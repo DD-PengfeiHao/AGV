@@ -1,0 +1,46 @@
+# Archives and duplicate snapshots
+*.zip
+AGV_WEB_PHASE3_PHASEB_P0_FREEZE_20260813/
+AGV_WEB_PHASE3_PHASEC_PRE_FULL_FIX_FREEZE_20260813/
+AGV_WEB_PHASE3_PHASEC_PRE_FULL_FIX_FREEZE_20260813_190521/
+AGV_WEB_PHASE_V04_PRE_IMPLEMENTATION_FREEZE_20260814/
+_audit_extract/
+ros2_ws(1)/
+
+# Local / editor
+.cursor/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Python / ROS build
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+install/
+build/
+log/
+.log/
+*.log
+
+# Large map / lidar dumps (keep source maps out of git)
+note/agv_downloaded/
+**/*.smap
+**/*.pcd
+**/*.bag
+
+# Vendor SDK blobs
+**/docker/vendor/**/*.tar.gz
+**/docker/vendor/**/*.deb
+
+# Secrets
+.env
+.env.*
+**/credentials.json
+**/*secret*
+**/*password*
+各关联件IP.txt
+
+# Temp probe scripts
+tmp_*

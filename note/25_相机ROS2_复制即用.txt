@@ -1,0 +1,18 @@
+【相机 ROS2 接通 · 复制即用 · 含5问确认】
+
+Domain: 30 | cam_front | 正式=ROS2（不要用 :8080）
+
+你发（绝对名）：
+  /camera/cam_front/image_raw/compressed
+  /camera/cam_front/heartbeat          (≥2Hz, 含 seq)
+  /camera/cam_front/status             (transport=xavier_ros2 禁止写 ros2)
+  /camera/cam_front/driver_info        (可选)
+  /camera/capture                      (服务)
+
+不要发 /camera/cam_front/info  ← 权威 connected 仅 NUC
+
+图像无 seq（ROS2 Header 无）；序号只在 heartbeat
+Basler IP 用实测，勿盲改 192.168.1.100；口名以 ip -br link 为准
+
+5问结论：note/相机需要确定的事情/00_鹏飞确认结论.md
+真实接口包：note/25_相机同事_ROS2真实接口包/

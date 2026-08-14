@@ -1,0 +1,36 @@
+# 给「后端 + 临时前端」Agent（复制转发）
+
+## 为什么用户浏览器看不到人脸
+ROS2 face_bridge stub 已通（报告 reports/20260807_122949_人脸ROS2接通face_bridge_v0.2.1.md），
+但 dashboard_node 没有把 /face/* 接到 HTTP，也没有 Demo/Debug 人脸区。
+→ 必须改后端 HTTP + 临时前端；只改一边不够。
+
+## 环境
+- 上位机：192.168.0.173
+- Jetson peer：192.168.0.225（用户 ubuntu / 密码 ubuntu）
+- Demo:19999 · Debug:1999 · ROS_DOMAIN_ID=30
+- 代码：workspace_v02/（容器跑的是 .run/workspace_v02/ 副本）
+
+## 必读（按顺序）
+1. docs/20_为什么Web看不到人脸_相机分工与分工.md
+2. docs/20_附件A_后端兼临时前端任务书.md  ← 你的任务书（note 同源）
+3. docs/19_前后端对齐与前端开发规格.md  ← 字段禁止私改
+4. docs/18_人脸ROS2接通完整技术方案.md
+5. reports/20260807_122949_人脸ROS2接通face_bridge_v0.2.1.md
+
+## 你要做
+- dashboard_node：订 face topic，写 state.face / cameras_meta / cargo=null
+- POST /api/face/identify、GET /api/face/status、GET /api/face/logs
+- 临时改 www/index.html + www/debug：徽章+识别一次+日志过滤
+- 不做送货闸门；不做整站大疆重构（那是另一个 Agent）
+- 交付报告：reports/YYYYMMDD_HHMMSS_Web人脸HTTP接通_v0.2.1.md
+
+## 相机冻结
+- 相机1 = cam_left = 扫码
+- 相机2 = cam_front = 人脸+扫码+目标识别（主）
+- 相机3 = cam_right = 第三视角+运载平台货物
+
+## 验收
+curl -s http://127.0.0.1:19999/api/state | jq '.face,.cameras_meta,.cargo'
+curl -s -X POST http://127.0.0.1:19999/api/face/identify -H 'Content-Type: application/json' -d '{"camera_name":"cam_front"}'
+浏览器 Demo/Debug 能看见人脸；smoke_v02.sh 不回归。

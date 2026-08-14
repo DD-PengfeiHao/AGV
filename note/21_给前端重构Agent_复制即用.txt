@@ -1,0 +1,29 @@
+# 给「前端完全重构」Agent（复制转发）
+
+## 角色
+你负责整站 Demo(19999)+Debug(1999) 完全重构，并深度研究大疆车端可视化信息架构。
+临时「让人脸在网页上能看见」由后端兼临时前端 Agent 做；你可以整页替换，但 API 契约不能破。
+
+## 环境
+- 上位机：192.168.0.173 · Jetson：192.168.0.225
+- 演示/调试端口：19999 / 1999（禁止改端口给验收）
+- 代码：workspace_v02/ros2_ws/src/delivery_web/（注意容器挂载 .run 副本）
+
+## 必读
+1. docs/21_前端完全重构_大疆研究提示词与同步包.md  ← 含完整提示词 §A + 同步包 §B
+2. docs/20_为什么Web看不到人脸_相机分工与分工.md
+3. docs/19_前后端对齐与前端开发规格.md（contract_version，字段红线）
+4. docs/14_v0.2冻结与双Web端口.md / docs/12_Web对标大疆GUI.md
+5. docs/18_人脸ROS2接通完整技术方案.md（人脸只观测，不做送货闸门）
+6. 报告：reports/20260807_122949_人脸ROS2接通face_bridge_v0.2.1.md
+7. 代码：workspace_v02/ros2_ws/src/delivery_web/
+
+## 相机冻结（改名=对齐失败）
+相机1=cam_left 扫码 | 相机2=cam_front 人脸+码+目标 | 相机3=cam_right 三视角+货物
+
+## 开工方式
+先把 docs/21 里「§A 提示词」整段作为你的系统任务执行；先输出研究结论再改代码。
+
+## 红线
+相对路径 /api/*；无送货闸门；无擅自 Socket.IO；字段改名先 bump docs/19 contract_version。
+必须消费 state.face / state.cameras_meta（后端兼临时前端会先接通；你重构时保留这些键的展示）。

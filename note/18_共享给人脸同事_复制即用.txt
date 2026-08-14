@@ -1,0 +1,46 @@
+【人脸 ROS2 接通约定 — 请确认并回复】
+
+1. 目的
+   只接通「人脸识别结果」到我们 AGV 上位系统，不做送货/收货流程。
+   通信方式：ROS2 Topic/Service（不用 HTTP 业务 API）。
+   你现有的 MJPEG Web 可保留给人眼看；系统联调以 ROS2 为准。
+
+2. 网络
+   - 你的 Jetson IP：192.168.0.225（若固定成别的，请马上告诉我）
+   - 我的上位机 IP：192.168.0.173
+   - 互相能 ping 通
+
+3. 必须一致
+   export ROS_DOMAIN_ID=30
+   export ROS_LOCALHOST_ONLY=0
+
+4. 请你优先实现（薄封装即可，不必重写算法）
+   发布 Topic：
+     /face/cam_front/detections
+   类型：
+     delivery_interfaces/msg/FaceDetectionArray
+   每条检测请尽量包含：
+     person_id, person_name, confidence, bbox_xywh[x,y,w,h], track_id, camera_name=cam_front
+
+   可选 Service：
+     /face/identify_face   (delivery_interfaces/srv/IdentifyFace)
+
+5. 联调顺序（下午）
+   ping 通 → ROS2 talker/chatter 跨机可见
+   → 先发「假 detections」验证管道
+   → 再接真识别结果
+
+6. 请回复我
+   [ ] Jetson 系统版本 / 是否已装 ROS2（Humble 还是 Foxy 还是没有）
+   [ ] 能否本周发布上述 Topic
+   [ ] confidence 含义与常用阈值
+   [ ] person_id 命名规则
+   [ ] 一键启动命令
+   [ ] 模型是否必须插外置 USB 盘
+
+7. 我会提供给你
+   - 完整技术方案文档（docs/18）
+   - delivery_interfaces 消息/服务源码
+   - 假数据发布验收标准
+
+有问题随时对齐，先通管道再接算法。
