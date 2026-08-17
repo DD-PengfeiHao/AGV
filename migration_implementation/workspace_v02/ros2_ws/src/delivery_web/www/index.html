@@ -6,13 +6,13 @@
 <title>IndustrialNext AGV Console v0.5</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
 <style>
 :root{
   --font-primary:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',Roboto,sans-serif;
   --font-mono:'JetBrains Mono','Fira Code','Cascadia Code',Consolas,monospace;
   --bg:#FFFFFF; --surface:#F7F8FA; --surface2:#FFFFFF; --line:#E5E7EB;
-  --text:#2D2D2D; --muted:#6B7280; --ok:#10B981; --warn:#F59E0B; --bad:#EF4444;
+  --text:#2D2D2D; --muted:#6B7280; --ok:#10B981; --warn:#F59E0B; --bad:#EF4444; --info:#3B82F6;
   --accent:#E5364A; --accent2:#C42B3D; --accent-light:#FF6B7A; --agv:#E5364A;
   --brand-black:#111111; --brand-red:#E5364A;
   --radius-sm:8px; --radius-md:12px; --radius-lg:16px; --radius-xl:20px; --radius-full:9999px; --radius:12px;
@@ -21,10 +21,11 @@
   --gradient-brand:linear-gradient(135deg,#111111 0%,#2D2D2D 100%);
   --gradient-red:linear-gradient(135deg,#E5364A 0%,#C42B3D 100%);
   --gradient-bg:linear-gradient(180deg,#F7F8FA 0%,#FFFFFF 100%);
-  --glass-bg:rgba(255,255,255,0.72); --glass-border:rgba(255,255,255,0.5);
+  --glass-bg:rgba(255,255,255,0.30); --glass-border:rgba(255,255,255,0.35);
   --shadow-glass:0 4px 24px rgba(0,0,0,0.06);
   --header-h:56px;
 }
+.hidden{display:none!important}
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
 body{
@@ -37,7 +38,7 @@ body{
 header.header{
   position:fixed;top:0;left:0;right:0;min-height:var(--header-h);height:auto;z-index:1000;
   display:flex;align-items:center;gap:10px;padding:8px 12px;
-  background:rgba(255,255,255,0.92);backdrop-filter:blur(16px);
+  background:rgba(255,255,255,0.30);backdrop-filter:blur(16px);
   border-bottom:1px solid rgba(0,0,0,0.06);
   flex-shrink:0;flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;
 }
@@ -108,7 +109,7 @@ main{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden;posi
 .widget-card.high-opacity{background:rgba(255,255,255,0.92)}
 .widget-header{
   display:flex;justify-content:space-between;align-items:center;padding:12px 16px;cursor:grab;
-  border-bottom:1px solid rgba(0,0,0,0.04);background:rgba(255,255,255,0.3);user-select:none;flex-shrink:0;
+  border-bottom:1px solid rgba(0,0,0,0.04);background:rgba(255,255,255,0.20);user-select:none;flex-shrink:0;
 }
 .widget-title{font-size:14px;font-weight:600;color:var(--brand-black)}
 .widget-actions{display:flex;gap:4px}
@@ -229,7 +230,7 @@ main{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden;posi
 
 .map-overlay{
   position:absolute;top:12px;left:12px;
-  background:rgba(255,255,255,0.72);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  background:rgba(255,255,255,0.30);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
   border:1px solid rgba(0,0,0,0.06);border-radius:var(--radius-md);
   padding:8px 12px;font-size:12px;color:var(--muted);pointer-events:none;z-index:2;max-width:70%;
   box-shadow:var(--shadow-glass);
@@ -237,14 +238,14 @@ main{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden;posi
 .map-layers{
   position:absolute;top:52px;left:12px;z-index:6;pointer-events:auto;
   display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;
-  background:rgba(255,255,255,0.8);backdrop-filter:blur(12px);
+  background:rgba(255,255,255,0.30);backdrop-filter:blur(12px);
   border:1px solid rgba(0,0,0,0.06);border-radius:var(--radius-md);
   padding:6px 10px;font-size:12px;color:var(--text);box-shadow:var(--shadow-glass);
 }
 .map-layers label{display:inline-flex;align-items:center;gap:4px;cursor:pointer;user-select:none}
 .map-tools{position:absolute;top:12px;right:12px;display:flex;gap:6px;z-index:6;pointer-events:auto}
 .map-tools button{
-  background:rgba(255,255,255,0.72);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  background:rgba(255,255,255,0.30);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
   border:1px solid rgba(0,0,0,0.08);color:var(--text);padding:8px 12px;border-radius:var(--radius-md);
   cursor:pointer;font-size:13px;font-weight:500;min-width:36px;min-height:36px;
   transition:all var(--transition-fast);font-family:var(--font-primary);
@@ -338,15 +339,15 @@ select,input[type=text],input[type=number]{
   font-family:"Cascadia Code","Consolas",monospace;line-height:1.2;
 }
 .alert-card.info{
-  background:rgba(30,42,62,0.75);border:1px solid rgba(59,130,246,0.7);
+  background:rgba(30,42,62,0.20);border:1px solid rgba(59,130,246,0.7);
   color:#93c5fd;z-index:90;
 }
 .alert-card.warning{
-  background:rgba(42,37,21,0.75);border:1px solid rgba(212,168,67,0.7);
+  background:rgba(42,37,21,0.20);border:1px solid rgba(245,158,11,0.7);
   color:#f0d680;z-index:95;
 }
 .alert-card.error{
-  background:rgba(46,21,21,0.80);border:1px solid rgba(214,92,92,0.8);
+  background:rgba(46,21,21,0.20);border:1px solid rgba(239,68,68,0.8);
   color:#f0a0a0;z-index:100;
 }
 @keyframes alertSlideIn{
@@ -387,9 +388,9 @@ select,input[type=text],input[type=number]{
 .modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.35);align-items:center;justify-content:center;z-index:1100;backdrop-filter:blur(4px)}
 .modal.show{display:flex}
 .modal-box{
-  background:rgba(255,255,255,0.95);backdrop-filter:blur(20px);
-  border:1px solid rgba(0,0,0,0.08);border-radius:var(--radius-lg);
-  padding:24px;min-width:300px;box-shadow:0 16px 48px rgba(0,0,0,0.12);
+  background:var(--glass-bg);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+  border:1px solid var(--glass-border);border-radius:var(--radius-lg);
+  padding:24px;min-width:300px;box-shadow:var(--shadow-glass);
 }
 .modal-box h4{margin:0 0 12px;font-size:18px;font-weight:700;color:var(--brand-black)}
 
@@ -436,8 +437,12 @@ select,input[type=text],input[type=number]{
   <span id="demoAgvInfo" style="display:none"></span>
   <span class="spacer"></span>
   <div class="header-actions restart-group">
-    <button type="button" class="btn" id="btnRestartComponent" title="重启关联子系统">重启关联件</button>
-    <button type="button" class="btn" id="btnRestartDocker" title="重启本机 Dashboard 容器">重启Docker</button>
+    <span class="hdr-chip hidden" id="authUserChip" title="当前用户">—</span>
+    <button type="button" class="btn btn-sm hidden" id="btnOpenDebug" title="Debug 控制台（管理员）">Debug</button>
+    <button type="button" class="btn btn-sm hidden" id="btnAuthRegister" title="注册新用户">注册用户</button>
+    <button type="button" class="btn btn-sm hidden" id="btnAuthLogout" title="退出登录">退出</button>
+    <button type="button" class="btn hidden" id="btnRestartComponent" title="管理员：重启关联子系统">重启关联件</button>
+    <button type="button" class="btn hidden" id="btnRestartDocker" title="管理员：重启 Docker 容器（非 NUC 整机）">重启容器</button>
   </div>
 </header>
 
@@ -615,10 +620,10 @@ select,input[type=text],input[type=number]{
   <div class="modal-box">
     <h4>重启 Docker 容器</h4>
     <p id="restartDockerMsg" style="font-size:14px;line-height:1.5;margin-bottom:16px">
-      确定要重启 Docker 容器吗？重启期间 Dashboard 将短暂不可用。
+      将执行 <code>docker restart</code>，仅重启容器内服务，<strong>不会</strong>重启 NUC 整机。Dashboard 将短暂不可用。
     </p>
     <div class="row">
-      <button class="btn primary" id="btnRestartDockerConfirm">确认重启</button>
+      <button class="btn primary" id="btnRestartDockerConfirm">确认重启容器</button>
       <button class="btn" id="btnRestartDockerCancel">取消</button>
     </div>
   </div>
@@ -663,6 +668,48 @@ select,input[type=text],input[type=number]{
   <div class="widget-panel-hint">提示：点击组件卡片右上角 × 也可关闭</div>
 </div>
 
+<div class="modal show" id="loginModal" style="z-index:2000">
+  <div class="modal-box" style="min-width:340px">
+    <h4>登录 AGV 控制台</h4>
+    <p class="st-meta" style="margin-bottom:12px">首次登录请立即修改默认密码。管理员默认账户：ubuntu / ubuntu</p>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <input id="loginUsername" class="btn" style="text-align:left;font-weight:400" placeholder="用户名" autocomplete="username"/>
+      <input id="loginPassword" type="password" class="btn" style="text-align:left;font-weight:400" placeholder="密码" autocomplete="current-password"/>
+      <button type="button" class="btn primary" id="btnLoginSubmit">登录</button>
+      <div id="loginError" class="st-meta" style="color:var(--bad);min-height:1.2em"></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal hidden" id="changePasswordModal" style="z-index:2100">
+  <div class="modal-box" style="min-width:340px">
+    <h4>修改密码</h4>
+    <p class="st-meta" style="margin-bottom:12px">检测到默认或待更换密码，请设置新密码（至少 8 位）。</p>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <input id="chgOldPassword" type="password" class="btn" style="text-align:left;font-weight:400" placeholder="当前密码" autocomplete="current-password"/>
+      <input id="chgNewPassword" type="password" class="btn" style="text-align:left;font-weight:400" placeholder="新密码" autocomplete="new-password"/>
+      <input id="chgNewPassword2" type="password" class="btn" style="text-align:left;font-weight:400" placeholder="确认新密码" autocomplete="new-password"/>
+      <button type="button" class="btn primary" id="btnChangePasswordSubmit">保存新密码</button>
+      <div id="changePasswordError" class="st-meta" style="color:var(--bad);min-height:1.2em"></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal hidden" id="adminRegisterModal">
+  <div class="modal-box" style="min-width:340px">
+    <h4>注册新用户</h4>
+    <p class="st-meta" style="margin-bottom:12px">仅管理员可注册，用户名不可重复。</p>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <input id="regUsername" class="btn" style="text-align:left;font-weight:400" placeholder="新用户名"/>
+      <input id="regPassword" type="password" class="btn" style="text-align:left;font-weight:400" placeholder="新密码"/>
+      <button type="button" class="btn primary" id="btnRegisterSubmit">注册</button>
+      <button type="button" class="btn" id="btnRegisterCancel">取消</button>
+      <div id="registerError" class="st-meta" style="color:var(--bad);min-height:1.2em"></div>
+    </div>
+  </div>
+</div>
+
+<script src="auth.js"></script>
 <script src="widgets.js"></script>
 <script src="alert_queue.js"></script>
 <script src="arm_widget.js"></script>
@@ -1819,13 +1866,101 @@ document.getElementById('ctlLock')?.addEventListener('change', async (e) => {
 });
 
 setInterval(pollHeartbeat, HEARTBEAT_MS);
-setInterval(pollState, STATE_POLL_MS);
-setInterval(pollWristLive, 400);
-setInterval(pollRoute, 2000);
+setInterval(() => { if (Auth.isLoggedIn()) pollState(); }, STATE_POLL_MS);
+setInterval(() => { if (Auth.isLoggedIn()) pollWristLive(); }, 400);
+setInterval(() => { if (Auth.isLoggedIn()) pollRoute(); }, 2000);
 bindVisionActions();
-pollHeartbeat();
-pollState();
-pollWristLive();
+
+async function bootApp() {
+  await Auth.init();
+  Auth.applyUi();
+  if (!Auth.isLoggedIn()) return;
+  if (!Auth.isAdmin()) delete window.WIDGET_REGISTRY.verbose_log;
+  initWidgets();
+  pollHeartbeat();
+  pollState();
+  pollWristLive();
+  loadRestartComponents();
+}
+bootApp();
+
+$('#btnLoginSubmit')?.addEventListener('click', async () => {
+  const errEl = $('#loginError');
+  try {
+    await Auth.login($('#loginUsername')?.value, $('#loginPassword')?.value);
+    Auth.applyUi();
+    if (!Auth.isAdmin()) delete window.WIDGET_REGISTRY.verbose_log;
+    initWidgets();
+    pollState();
+    errEl.textContent = '';
+  } catch (e) {
+    errEl.textContent = e.message || '登录失败';
+  }
+});
+$('#loginPassword')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') $('#btnLoginSubmit')?.click();
+});
+$('#btnAuthLogout')?.addEventListener('click', async () => {
+  await Auth.logout();
+  Auth.applyUi();
+  location.reload();
+});
+$('#btnAuthRegister')?.addEventListener('click', () => {
+  $('#adminRegisterModal')?.classList.remove('hidden');
+  $('#adminRegisterModal')?.classList.add('show');
+});
+$('#btnRegisterCancel')?.addEventListener('click', () => {
+  $('#adminRegisterModal')?.classList.remove('show');
+});
+$('#btnRegisterSubmit')?.addEventListener('click', async () => {
+  const errEl = $('#registerError');
+  try {
+    const j = await Auth.register($('#regUsername')?.value, $('#regPassword')?.value);
+    showToast(j.message || '注册成功', 'ok');
+    $('#adminRegisterModal')?.classList.remove('show');
+    errEl.textContent = '';
+  } catch (e) {
+    errEl.textContent = e.message || '注册失败';
+  }
+});
+$('#btnOpenDebug')?.addEventListener('click', () => {
+  const port = (state && state.ports && state.ports.debug) || 1999;
+  const targetOrigin = `http://${location.hostname}:${port}`;
+  const w = window.open(`${targetOrigin}/`, '_blank');
+  const token = sessionStorage.getItem('agv_session_token') || '';
+  if (!w || !token) return;
+  let tries = 0;
+  const timer = setInterval(() => {
+    tries += 1;
+    try {
+      w.postMessage({ type: 'agv_session', token }, targetOrigin);
+    } catch (e) { /* ignore until ready */ }
+    if (tries >= 25) clearInterval(timer);
+  }, 200);
+});
+$('#btnChangePasswordSubmit')?.addEventListener('click', async () => {
+  const errEl = $('#changePasswordError');
+  const p1 = $('#chgNewPassword')?.value || '';
+  const p2 = $('#chgNewPassword2')?.value || '';
+  if (p1.length < 8) {
+    errEl.textContent = '新密码至少 8 个字符';
+    return;
+  }
+  if (p1 !== p2) {
+    errEl.textContent = '两次输入的新密码不一致';
+    return;
+  }
+  try {
+    await Auth.changePassword($('#chgOldPassword')?.value, p1);
+    showToast('密码已更新', 'ok');
+    $('#changePasswordModal')?.classList.remove('show');
+    errEl.textContent = '';
+    await Auth.refreshSession();
+    Auth.applyUi();
+  } catch (e) {
+    errEl.textContent = e.message || '修改失败';
+  }
+});
 
 function bindMapLayers() {
   const m = document.getElementById('layerMap');
@@ -2125,6 +2260,7 @@ window.onVerboseStatusChange = function (status) {
 function initWidgets() {
   if (window.__widgetsInited) return;
   window.__widgetsInited = true;
+  if (window.Auth && !Auth.isAdmin()) delete window.WIDGET_REGISTRY.verbose_log;
   widgetMgr = new WidgetManager('widgetLayer');
   const defaults = ['agv_status', 'operation_log'];
   widgetMgr.restoreFromStorage(defaults);
@@ -2139,8 +2275,10 @@ function initWidgets() {
 }
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initWidgets);
-} else {
+  document.addEventListener('DOMContentLoaded', () => {
+    if (Auth.isLoggedIn()) initWidgets();
+  });
+} else if (Auth.isLoggedIn()) {
   initWidgets();
 }
 
@@ -2216,7 +2354,7 @@ $('#btnRestartComponentCancel')?.addEventListener('click', () => {
 $('#btnRestartDocker')?.addEventListener('click', () => {
   const msg = $('#restartDockerMsg');
   if (msg) {
-    msg.textContent = `确定要重启容器「${DOCKER_RESTART_CONTAINER}」吗？重启期间 Dashboard 将短暂不可用。`;
+    msg.innerHTML = `将执行 <code>docker restart ${DOCKER_RESTART_CONTAINER}</code>。<br>仅重启 Docker 容器内服务，<strong>不会</strong>重启 NUC 整机。Dashboard 将短暂不可用。`;
   }
   $('#restartDockerModal')?.classList.add('show');
 });
@@ -2236,9 +2374,9 @@ $('#btnRestartDockerConfirm')?.addEventListener('click', async () => {
     $('#restartDockerModal')?.classList.remove('show');
     setTimeout(() => { window.location.reload(); }, 8000);
   } catch (err) {
-    showToast('Docker 重启请求失败: ' + err.message, 'err');
+    showToast('系统重启请求失败: ' + err.message, 'err');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '确认重启'; }
+    if (btn) { btn.disabled = false; btn.textContent = '确认重启容器'; }
   }
 });
 </script>

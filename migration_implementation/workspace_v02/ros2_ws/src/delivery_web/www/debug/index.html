@@ -92,6 +92,23 @@ a{color:var(--accent)}
   <span>API: /api/debug /api/logs /api/watch · freeze v0.2.0</span>
 </footer>
 <script>
+const MAIN_DEMO_PORT = 19999;
+window.addEventListener('message', (e) => {
+  const allowed = `http://${location.hostname}:${MAIN_DEMO_PORT}`;
+  if (e.origin !== allowed) return;
+  if (e.data && e.data.type === 'agv_session' && e.data.token) {
+    sessionStorage.setItem('agv_session_token', e.data.token);
+  }
+});
+const _dbgFetch = window.fetch.bind(window);
+window.fetch = (url, opts) => {
+  opts = opts || {};
+  const h = Object.assign({}, opts.headers || {});
+  const t = sessionStorage.getItem('agv_session_token');
+  if (t && !h.Authorization) h.Authorization = `Bearer ${t}`;
+  opts.headers = h;
+  return _dbgFetch(url, opts);
+};
 let dbg=null, hideBefore=0;
 const $=$=>document.querySelector($);
 function esc(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
@@ -151,7 +168,16 @@ function render(){
   renderWatch(); renderSubs(); renderParams(); renderLogs();
   $('#treeBox').innerHTML=renderTree(dbg.state_tree);
 }
-async function poll(){ try{ dbg=await(await fetch('/api/debug')).json(); render(); }catch(e){ $('#footL').textContent='disconnected'; } }
+async function poll(){
+  try{
+    const sess = await (await fetch('/api/auth/session')).json();
+    if (!sess.logged_in || !sess.is_admin) {
+      $('#footL').textContent = '需要管理员登录 — 请从主控制台 Debug 按钮进入';
+      return;
+    }
+    dbg=await(await fetch('/api/debug')).json(); render();
+  }catch(e){ $('#footL').textContent='disconnected'; }
+}
 function pin(p){ fetch('/api/watch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({add:p})}).then(poll); }
 function addWatch(){ const p=$('#watchAdd').value.trim(); if(p) pin(p); }
 function clearView(){ hideBefore=Date.now(); faceLogCache=null; renderLogs(); }

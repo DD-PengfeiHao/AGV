@@ -76,7 +76,9 @@ except Exception:  # noqa: BLE001
     RobokitError = Exception  # type: ignore
 
 
-VERSION = "0.52.1"
+from delivery_web.web_auth import WebAuth
+
+VERSION = "0.52.2"
 WEB_FACE_API = 1
 
 FATAL_CODE_MAP: Dict[int, str] = {
@@ -376,6 +378,7 @@ class DashboardNode(Node):
             self._env["use_sim_cameras"] = False
         self._env["mode"] = "demo"
         self._device_cfg = DeviceConfig.load()
+        self._web_auth = WebAuth()
         os.environ.setdefault("ROS_DOMAIN_ID", str(self._device_cfg.ros_domain_id))
         os.environ.setdefault("RMW_IMPLEMENTATION", "rmw_fastrtps_cpp")
         self._agv_adapter: Any = None
@@ -949,8 +952,12 @@ class DashboardNode(Node):
         threading.Thread(target=_worker, daemon=True, name="docker-restart").start()
         return {
             "success": True,
-            "message": f"正在重启容器 {container}，Dashboard 将短暂不可用",
+            "message": (
+                f"正在重启 Docker 容器「{container}」（非 NUC 整机重启），"
+                "Dashboard 将短暂不可用"
+            ),
             "container": container,
+            "action": "docker_restart",
         }
 
     def _get_stations_dict(self) -> Dict[str, Dict[str, float]]:
@@ -2950,10 +2957,70 @@ class DashboardNode(Node):
                 self.send_header("Access-Control-Allow-Headers", "Content-Type")
                 self.end_headers()
 
+            def _session_user(self):
+                token = WebAuth.extract_token(self.headers)
+                return node._web_auth.session_from_token(token)
+
+            def _require_login(self):
+                user = self._session_user()
+                if not user:
+                    self._json(401, {"success": False, "message": "未登录", "auth_required": True})
+                    return None
+                return user
+
+            def _require_admin(self):
+                user = self._require_login()
+                if not user:
+                    return None
+                if user.get("role") != "admin":
+                    self._json(403, {"success": False, "message": "需要管理员权限"})
+                    return None
+                return user
+
+            def _check_admin_route(self, path: str) -> bool:
+                if not node._web_auth.is_admin_route(path):
+                    return True
+                return self._require_admin() is not None
+
+            def _guard_api(self, path: str) -> bool:
+                if not path.startswith("/api/"):
+                    return True
+                if node._web_auth.requires_login(path) and self._require_login() is None:
+                    return False
+                if node._web_auth.is_danger_route(path) and self._require_admin() is None:
+                    return False
+                if node._web_auth.is_admin_route(path) and self._require_admin() is None:
+                    return False
+                return True
+
             def do_GET(self) -> None:  # noqa: N802
                 parsed = urlparse(self.path)
                 path = parsed.path
                 q = parse_qs(parsed.query)
+                if path == "/api/auth/session":
+                    user = self._session_user()
+                    if not user:
+                        self._json(200, {"logged_in": False})
+                        return
+                    self._json(
+                        200,
+                        {
+                            "logged_in": True,
+                            "username": user.get("username"),
+                            "role": user.get("role"),
+                            "is_admin": user.get("role") == "admin",
+                            "must_change_password": bool(user.get("must_change_password")),
+                        },
+                    )
+                    return
+                if path.startswith("/api/auth/"):
+                    self._json(404, {"error": "not found"})
+                    return
+                if path.startswith("/api/") and not self._guard_api(path):
+                    return
+                if mode == "debug" and path.startswith("/api/"):
+                    if self._require_admin() is None:
+                        return
                 if path == "/api/jason/camera/status":
                     try:
                         st = node._vision_cache.get("wrist_camera")
@@ -3303,6 +3370,43 @@ class DashboardNode(Node):
                 except json.JSONDecodeError:
                     self._json(400, {"success": False, "message": "bad json"})
                     return
+                if path == "/api/auth/login":
+                    out = node._web_auth.login(
+                        str(payload.get("username", "")),
+                        str(payload.get("password", "")),
+                    )
+                    code = 200 if out.get("success") else 401
+                    self._json(code, out)
+                    return
+                if path == "/api/auth/logout":
+                    token = WebAuth.extract_token(self.headers) or str(payload.get("token", ""))
+                    self._json(200, node._web_auth.logout(token))
+                    return
+                if path == "/api/auth/register":
+                    token = WebAuth.extract_token(self.headers) or str(payload.get("token", ""))
+                    out = node._web_auth.register(
+                        token,
+                        str(payload.get("username", "")),
+                        str(payload.get("password", "")),
+                    )
+                    code = 200 if out.get("success") else 400
+                    self._json(code, out)
+                    return
+                if path == "/api/auth/change_password":
+                    token = WebAuth.extract_token(self.headers) or str(payload.get("token", ""))
+                    out = node._web_auth.change_password(
+                        token,
+                        str(payload.get("old_password", "")),
+                        str(payload.get("new_password", "")),
+                    )
+                    code = 200 if out.get("success") else 400
+                    self._json(code, out)
+                    return
+                if path.startswith("/api/") and not self._guard_api(path):
+                    return
+                if mode == "debug" and path.startswith("/api/"):
+                    if self._require_admin() is None:
+                        return
                 if path == "/api/agv/lock":
                     wanted = payload.get("locked", payload.get("wanted", True))
                     self._json(200, node.set_control_lock(bool(wanted)))
