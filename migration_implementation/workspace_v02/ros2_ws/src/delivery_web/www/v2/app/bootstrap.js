@@ -68,6 +68,7 @@
       this._probeVersionLatency();
 
       this._started = true;
+      if (global.AGV_V2 && global.AGV_V2.initBlackBoxShortcut) global.AGV_V2.initBlackBoxShortcut();
       if (global.eventStore) global.eventStore.info('APP', 'V2 bootstrap started');
     },
 
@@ -101,8 +102,15 @@
 
       if (V2.registerAgvObserve) V2.registerAgvObserve(cr);
       if (V2.registerDebugComponents) V2.registerDebugComponents(cr);
+      if (V2.registerBlackBoxUi) V2.registerBlackBoxUi(cr);
 
-      gr.register('system', { title: 'System', order: 10, size: 'sm', collapsed: true, components: [] });
+      gr.register('system', {
+        title: 'System',
+        order: 10,
+        size: 'sm',
+        collapsed: false,
+        components: ['blackbox.status'],
+      });
       gr.register('agv', {
         title: 'AGV · Observe',
         description: 'Pose, velocity, safety — from /api/state',

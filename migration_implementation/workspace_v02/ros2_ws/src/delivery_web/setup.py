@@ -7,7 +7,7 @@ package_name = 'delivery_web'
 setup(
     name=package_name,
     version='0.4.0',
-    packages=[package_name, f"{package_name}.vision", f"{package_name}.arm"],
+    packages=[package_name, f"{package_name}.vision", f"{package_name}.arm", f"{package_name}.blackbox"],
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),

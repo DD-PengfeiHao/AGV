@@ -78,7 +78,12 @@ except Exception:  # noqa: BLE001
 
 from delivery_web.web_auth import WebAuth
 
-VERSION = "0.52.3"
+try:
+    from delivery_web.blackbox import BlackBoxManager
+except Exception:  # noqa: BLE001
+    BlackBoxManager = None  # type: ignore
+
+VERSION = "0.52.4"
 WEB_FACE_API = 1
 
 FATAL_CODE_MAP: Dict[int, str] = {
@@ -379,6 +384,16 @@ class DashboardNode(Node):
         self._env["mode"] = "demo"
         self._device_cfg = DeviceConfig.load()
         self._web_auth = WebAuth()
+        self._blackbox = None
+        if BlackBoxManager is not None:
+            try:
+                self._blackbox = BlackBoxManager(
+                    version=VERSION,
+                    logger=lambda m: self.get_logger().info(str(m)),
+                    snapshot_fn=self.snapshot,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.get_logger().warning(f"BlackBox unavailable: {exc}")
         os.environ.setdefault("ROS_DOMAIN_ID", str(self._device_cfg.ros_domain_id))
         os.environ.setdefault("RMW_IMPLEMENTATION", "rmw_fastrtps_cpp")
         self._agv_adapter: Any = None
@@ -572,6 +587,7 @@ class DashboardNode(Node):
         self.create_timer(1.0, self._vision_warmup_tick, callback_group=self._cg)
         self.create_timer(30.0, self._stack_watchdog_tick, callback_group=self._cg)
         self.create_timer(2.0, self._vision_status_tick, callback_group=self._cg)
+        self.create_timer(0.5, self._blackbox_tick, callback_group=self._cg)
         self._init_complete = True
 
     def _resolve_www_paths(self) -> None:
@@ -1141,6 +1157,12 @@ class DashboardNode(Node):
                     "trace_id": trace_id,
                 }
             )
+        bb = getattr(self, "_blackbox", None)
+        if bb:
+            try:
+                bb.feed_event(kind, message, level=level, event=event or kind, trace_id=trace_id)
+            except Exception:  # noqa: BLE001
+                pass
 
     def _load_stations(self) -> None:
         """Fallback: stations JSON only (no cloud/curves). Prefer _load_smap."""
@@ -1695,6 +1717,12 @@ class DashboardNode(Node):
             with self._lock:
                 prev = name not in self._jpeg
                 self._jpeg[name] = jpg
+            bb = getattr(self, "_blackbox", None)
+            if bb:
+                try:
+                    bb.feed_camera(name, jpg)
+                except Exception:  # noqa: BLE001
+                    pass
             if prev:
                 self._slog.log(
                     "camera_frame_first",
@@ -1776,6 +1804,60 @@ class DashboardNode(Node):
                 face["bbox_xywh"] = []
                 face["track_id"] = ""
             self._state["updated_at"] = time.time()
+
+    def _blackbox_tick(self) -> None:
+        bb = getattr(self, "_blackbox", None)
+        if not bb:
+            return
+        try:
+            with self._lock:
+                light = {
+                    "version": VERSION,
+                    "agv": self._state.get("agv"),
+                    "arm": dict(getattr(self, "_arm_cache", None) or {}),
+                    "route": self._state.get("route"),
+                    "route_task": dict(self._route_task),
+                    "env": self._state.get("env"),
+                    "uptime_sec": time.time() - self._t0,
+                    "alerts": self._collect_system_alerts(),
+                }
+            bb.feed_state(light)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            wrist = self._get_vision().jason_snapshot()
+            if wrist and len(wrist) > 80:
+                bb.feed_camera("wrist_camera", wrist)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def blackbox_status(self) -> Dict[str, Any]:
+        bb = getattr(self, "_blackbox", None)
+        if not bb:
+            return {"success": False, "available": False, "message": "BlackBox unavailable"}
+        return {"success": True, "available": True, **bb.status()}
+
+    def blackbox_trigger(self, payload: Dict[str, Any], user: str = "") -> Dict[str, Any]:
+        bb = getattr(self, "_blackbox", None)
+        if not bb:
+            return {"success": False, "message": "BlackBox unavailable"}
+        return bb.trigger(
+            source=str(payload.get("source", "api")),
+            user=user,
+            payload=payload,
+        )
+
+    def blackbox_list(self, limit: int = 20) -> Dict[str, Any]:
+        bb = getattr(self, "_blackbox", None)
+        if not bb:
+            return {"success": False, "records": []}
+        return {"success": True, **bb.list_records(limit=limit)}
+
+    def blackbox_get(self, record_id: str) -> Dict[str, Any]:
+        bb = getattr(self, "_blackbox", None)
+        if not bb:
+            return {"success": False, "message": "BlackBox unavailable"}
+        return bb.get_record(record_id)
 
     def snapshot(self) -> Dict[str, Any]:
         vision = self._vision_snapshot()
@@ -3101,6 +3183,20 @@ class DashboardNode(Node):
                 if path == "/api/stack/status":
                     self._json(200, node._stack_supervisor.status())
                     return
+                if path == "/api/blackbox/status":
+                    self._json(200, node.blackbox_status())
+                    return
+                if path == "/api/blackbox/list":
+                    limit = int((q.get("limit") or ["20"])[0])
+                    self._json(200, node.blackbox_list(limit=limit))
+                    return
+                if path == "/api/blackbox/record":
+                    rid = str((q.get("id") or [""])[0]).strip()
+                    if not rid:
+                        self._json(400, {"success": False, "message": "id required"})
+                        return
+                    self._json(200, node.blackbox_get(rid))
+                    return
                 if path == "/api/restart/components":
                     self._json(200, node.list_restart_components())
                     return
@@ -3486,6 +3582,13 @@ class DashboardNode(Node):
                     return
                 if path == "/api/stack/ensure":
                     self._json(200, node._stack_supervisor.ensure_all(force=True))
+                    return
+                if path == "/api/blackbox/trigger":
+                    user_obj = self._session_user()
+                    username = (user_obj or {}).get("username", "")
+                    out = node.blackbox_trigger(payload, user=username)
+                    code = 200 if out.get("success") else 400
+                    self._json(code, out)
                     return
                 if path == "/api/restart/component":
                     name = str(payload.get("name", "")).strip()
