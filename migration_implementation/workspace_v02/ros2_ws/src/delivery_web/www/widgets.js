@@ -130,7 +130,6 @@
         <div class="widget-header">
           <span class="widget-title">${cfg.title || id}</span>
           <div class="widget-actions">
-            <button type="button" class="widget-minimize" title="最小化">—</button>
             <button type="button" class="widget-close" title="关闭">×</button>
           </div>
         </div>
@@ -145,13 +144,6 @@
       card.querySelector('.widget-close').addEventListener('click', (e) => {
         e.stopPropagation();
         this.removeWidget(id);
-      });
-
-      const minBtn = card.querySelector('.widget-minimize');
-      minBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        card.classList.toggle('minimized');
-        this._saveLayout();
       });
 
       card.addEventListener('mousedown', () => this.bringToFront(card));
@@ -290,7 +282,6 @@
           y: parseInt(card.style.top, 10) || 0,
           w: card.offsetWidth,
           h: card.offsetHeight,
-          minimized: card.classList.contains('minimized'),
         };
       });
       try {
@@ -326,7 +317,6 @@
         if (saved.y != null) card.style.top = saved.y + 'px';
         if (saved.w) card.style.width = saved.w + 'px';
         if (saved.h) card.style.height = saved.h + 'px';
-        if (saved.minimized) card.classList.add('minimized');
       } else if (cfg.defaultX != null) {
         card.style.left = cfg.defaultX + 'px';
         card.style.top = (cfg.defaultY || 64) + 'px';

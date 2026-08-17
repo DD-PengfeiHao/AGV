@@ -82,8 +82,13 @@ class JasonCameraWebBridge:
             self._qr_updated = time.time()
 
     def latest_jpeg(self) -> Optional[bytes]:
+        now = time.time()
         with self._lock:
-            return self._jpeg
+            jpg = self._jpeg
+            last = self._last_frame
+        if not jpg or last <= 0 or (now - last) > 8.0:
+            return None
+        return jpg
 
     def status(self) -> Dict[str, Any]:
         now = time.time()

@@ -37,8 +37,12 @@ wrist_camera:
 leo_face:
   jetson_host: 172.31.0.85
   camera_host: 172.31.0.87
+  camera_name: cam_front
   ros_domain_id: 30
-  status: developing
+  ros_result_topic: /face/cam_front/recognition_result
+  ros_continuous_service: /face/cam_front/continuous_recognition
+  ros_capture_service: /face/cam_front/capture_and_recognize
+  status: live
 
 xarm7:
   # Physical UFACTORY controller IP (same as Zack docker-compose ROBOT_IP), NOT the ROS host.
@@ -52,6 +56,7 @@ xarm7:
   service_pick_place: /do_pick_place
   service_gripper: /set_gripper
   default_arm_mode: real
+  allow_real_motion: true
 
 ros:
   domain_id: 30

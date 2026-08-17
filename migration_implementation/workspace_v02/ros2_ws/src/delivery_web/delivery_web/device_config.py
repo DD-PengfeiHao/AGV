@@ -63,6 +63,12 @@ class DeviceConfig:
     xarm_robot_ip: str = "172.31.0.123"
     xarm_model: str = "UFACTORY-xArm7"
     xarm_default_mode: str = "simulation"
+    xarm_allow_real_motion: bool = False
+    xarm_service_unlock: str = "/unlock_and_home"
+    xarm_service_pick_place: str = "/do_pick_place"
+    xarm_service_gripper: str = "/set_gripper"
+    xarm_ros_state_topic: str = "/pick_place_state"
+    xarm_ros_joint_topic: str = "/joint_states"
     localization: LocalizationThresholds = field(default_factory=LocalizationThresholds)
 
     @classmethod
@@ -114,6 +120,12 @@ class DeviceConfig:
             xarm_robot_ip=str(xarm.get("host", "172.31.0.123")),
             xarm_model=str(xarm.get("model", "UFACTORY-xArm7")),
             xarm_default_mode=str(xarm.get("default_arm_mode", "simulation")),
+            xarm_allow_real_motion=bool(xarm.get("allow_real_motion", False)),
+            xarm_service_unlock=str(xarm.get("service_unlock", "/unlock_and_home")),
+            xarm_service_pick_place=str(xarm.get("service_pick_place", "/do_pick_place")),
+            xarm_service_gripper=str(xarm.get("service_gripper", "/set_gripper")),
+            xarm_ros_state_topic=str(xarm.get("ros_state_topic", "/pick_place_state")),
+            xarm_ros_joint_topic=str(xarm.get("ros_joint_topic", "/joint_states")),
             localization=LocalizationThresholds(
                 position_error_warn_m=float(loc.get("position_error_warn_m", 0.15)),
                 position_error_error_m=float(loc.get("position_error_error_m", 0.35)),
@@ -155,6 +167,7 @@ class DeviceConfig:
                 "host": self.xarm_robot_ip,
                 "model": self.xarm_model,
                 "default_arm_mode": self.xarm_default_mode,
+                "allow_real_motion": self.xarm_allow_real_motion,
             },
         }
 

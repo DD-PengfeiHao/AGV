@@ -106,7 +106,6 @@ main{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden;posi
 .widget-card:hover{box-shadow:0 8px 32px rgba(0,0,0,0.1),0 2px 8px rgba(0,0,0,0.06),inset 0 1px 0 rgba(255,255,255,0.6)}
 .widget-card.dragging,.widget-card.resizing{box-shadow:0 16px 48px rgba(0,0,0,0.12),0 4px 16px rgba(0,0,0,0.08)}
 .widget-card.high-opacity{background:rgba(255,255,255,0.92)}
-.widget-card.minimized .widget-body{display:none}
 .widget-header{
   display:flex;justify-content:space-between;align-items:center;padding:12px 16px;cursor:grab;
   border-bottom:1px solid rgba(0,0,0,0.04);background:rgba(255,255,255,0.3);user-select:none;flex-shrink:0;
@@ -157,6 +156,11 @@ main{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden;posi
 .arm-widget{font-size:13px}
 .arm-online{margin-bottom:8px;font-weight:600}
 .arm-online.on{color:var(--ok)} .arm-online.off{color:var(--bad)}
+.arm-motion-gate{font-size:11px;margin-bottom:8px;padding:6px 8px;border-radius:6px;line-height:1.35}
+.arm-motion-gate.ok{background:rgba(16,185,129,.12);color:var(--ok)}
+.arm-motion-gate.blocked{background:rgba(239,68,68,.12);color:var(--bad)}
+.arm-motion-gate.warn{background:rgba(245,158,11,.12);color:#b45309}
+.arm-motion-toggle{font-size:11px;margin-left:auto}
 .arm-progress-track{background:rgba(0,0,0,0.06);height:6px;border-radius:var(--radius-full);overflow:hidden}
 .arm-progress-bar{background:var(--gradient-red);height:100%;width:0;transition:width var(--transition-normal)}
 .arm-block-text{font-size:12px;color:var(--muted);margin:4px 0 8px}
@@ -314,7 +318,58 @@ select,input[type=text],input[type=number]{
 .st-meta{font-size:11px;color:var(--muted);margin-top:2px}
 .st-actions{display:flex;flex-wrap:wrap;gap:4px}
 
-/* Toast */
+/* Fault-code alert popups */
+.alert-container{
+  position:fixed;top:56px;left:50%;transform:translateX(-50%);
+  z-index:90;display:none;flex-direction:column;align-items:center;
+  gap:6px;max-width:360px;max-height:50vh;overflow:hidden;pointer-events:none;
+}
+.alert-card{
+  pointer-events:auto;width:340px;border-radius:8px;padding:8px 14px;
+  box-shadow:0 4px 16px rgba(0,0,0,.35);
+  animation:alertSlideIn .3s ease forwards;
+  transition:transform .3s ease,opacity .2s ease;
+  position:relative;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+}
+.alert-card.fading-out{animation:alertSlideOut .2s ease forwards}
+.alert-card .alert-line1{font-size:.82rem;font-weight:500;line-height:1.3}
+.alert-card .alert-line2{
+  font-size:.68rem;opacity:.75;margin-top:2px;
+  font-family:"Cascadia Code","Consolas",monospace;line-height:1.2;
+}
+.alert-card.info{
+  background:rgba(30,42,62,0.75);border:1px solid rgba(59,130,246,0.7);
+  color:#93c5fd;z-index:90;
+}
+.alert-card.warning{
+  background:rgba(42,37,21,0.75);border:1px solid rgba(212,168,67,0.7);
+  color:#f0d680;z-index:95;
+}
+.alert-card.error{
+  background:rgba(46,21,21,0.80);border:1px solid rgba(214,92,92,0.8);
+  color:#f0a0a0;z-index:100;
+}
+@keyframes alertSlideIn{
+  from{opacity:0;transform:translateY(-12px)}
+  to{opacity:1;transform:translateY(0)}
+}
+@keyframes alertSlideOut{
+  from{opacity:1;transform:translateY(0)}
+  to{opacity:0;transform:translateY(-8px)}
+}
+
+.restart-group{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.restart-group .btn{font-size:12px;padding:5px 10px;white-space:nowrap}
+.restart-list{display:flex;flex-direction:column;gap:8px;max-height:320px;overflow:auto;margin:12px 0}
+.restart-item{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);
+  background:#fff;cursor:pointer;transition:background var(--transition-fast);
+}
+.restart-item:hover{background:rgba(229,54,74,0.04);border-color:rgba(229,54,74,0.25)}
+.restart-item-label{font-weight:600;font-size:14px}
+.restart-item-meta{font-size:11px;color:var(--muted);margin-top:2px}
+
 #toastHost{position:fixed;top:calc(var(--header-h) + 12px);right:12px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;max-width:360px}
 .toast{
   padding:12px 16px;border-radius:var(--radius-md);font-size:13px;line-height:1.4;
@@ -379,7 +434,14 @@ select,input[type=text],input[type=number]{
   <span class="hdr-chip" id="hdrPose">X —</span>
   <span class="hdr-chip" id="hdrMeta">—</span>
   <span id="demoAgvInfo" style="display:none"></span>
+  <span class="spacer"></span>
+  <div class="header-actions restart-group">
+    <button type="button" class="btn" id="btnRestartComponent" title="重启关联子系统">重启关联件</button>
+    <button type="button" class="btn" id="btnRestartDocker" title="重启本机 Dashboard 容器">重启Docker</button>
+  </div>
 </header>
+
+<div id="alertContainer" class="alert-container"></div>
 
 <main>
   <section class="map-section">
@@ -428,7 +490,7 @@ select,input[type=text],input[type=number]{
 
     <article class="v-card" id="cardWrist">
       <div class="v-card-head">
-        <h3>Wrist Camera · Pylon</h3>
+        <h3>Wrist Camera · Pylon 腕部</h3>
         <span class="badge" id="wristBadge">—</span>
     </div>
       <div class="v-card-body">
@@ -538,6 +600,30 @@ select,input[type=text],input[type=number]{
 
 <div id="toastHost"></div>
 
+<div class="modal" id="restartComponentModal">
+  <div class="modal-box" style="min-width:360px">
+    <h4>重启关联件</h4>
+    <p class="st-meta" style="margin-bottom:8px">选择要重启的功能模块，操作需要二次确认。</p>
+    <div class="restart-list" id="restartComponentList"></div>
+    <div class="row" style="margin-top:12px">
+      <button class="btn" id="btnRestartComponentCancel">取消</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="restartDockerModal">
+  <div class="modal-box">
+    <h4>重启 Docker 容器</h4>
+    <p id="restartDockerMsg" style="font-size:14px;line-height:1.5;margin-bottom:16px">
+      确定要重启 Docker 容器吗？重启期间 Dashboard 将短暂不可用。
+    </p>
+    <div class="row">
+      <button class="btn primary" id="btnRestartDockerConfirm">确认重启</button>
+      <button class="btn" id="btnRestartDockerCancel">取消</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="stationModal">
   <div class="modal-box">
     <h4>新增站点</h4>
@@ -578,6 +664,7 @@ select,input[type=text],input[type=number]{
 </div>
 
 <script src="widgets.js"></script>
+<script src="alert_queue.js"></script>
 <script src="arm_widget.js"></script>
 <script src="verbose_log_widget.js"></script>
 <script>
@@ -589,6 +676,7 @@ const STATE_POLL_MS = 2500;
 const HEARTBEAT_MS = 800;
 let wristSnapUrl = null;
 let wristSnapBusy = false;
+let wristSnapMiss = 0;
 let followAGV = true;
 let view = { cx: 0, cy: 0, scale: 1.0 };
 let drag = null;
@@ -1139,17 +1227,21 @@ function renderVision() {
     }
   }
   const wImg = $('#wristImg'), wPh = $('#wristPlaceholder');
-  if (wSt === 'OFFLINE' && !rosOn && !netOn) {
+  const haveSnap = !!wristSnapUrl;
+  if (wSt === 'OFFLINE' && !rosOn && !netOn && !haveSnap) {
     wImg.style.display = 'none';
     wPh.style.display = 'block';
     wPh.textContent = `CAMERA OFFLINE · ${wcHost}`;
-  } else if (!imgOk) {
+  } else if (!imgOk && !haveSnap) {
+    wImg.style.display = 'none';
     wPh.style.display = 'block';
+    const age = wc.last_frame_ms_ago;
+    const ageTxt = age != null ? ` · last ${Math.round(age / 100) / 10}s` : '';
     const dom = wc.ros_domain_id ?? dev.ros_domain_id ?? 30;
     if (netOn && !rosOn) wPh.textContent = `NET OK · NO ROS PUBLISHER (Domain ${dom})`;
-    else if (rosOn) wPh.textContent = 'CAMERA ONLINE · IMAGE STREAM UNAVAILABLE';
+    else if (rosOn) wPh.textContent = 'WAITING FOR IMAGE' + ageTxt;
     else wPh.textContent = 'WAITING FOR ROS IMAGE';
-  } else {
+  } else if (haveSnap) {
     wImg.style.display = 'block';
     wPh.style.display = 'none';
   }
@@ -1392,6 +1484,11 @@ async function pollHeartbeat() {
 async function pollState() {
   try {
     state = await fetchJson('/api/state');
+    if (window.AlertQueue && Array.isArray(state.alerts)) {
+      window.AlertQueue.syncFromState(state.alerts);
+    } else if (window.StatusBanner && Array.isArray(state.alerts)) {
+      window.StatusBanner.sync(state.alerts);
+    }
     render();
     if (!mapSynced) {
       mapSynced = true;
@@ -1418,7 +1515,7 @@ function pollWristLive() {
   wristSnapBusy = true;
   fetch('/api/vision/wrist_camera/snapshot?t=' + Date.now(), {
     cache: 'no-store',
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+    signal: AbortSignal.timeout(2500)
   })
     .then(r => {
       if (!r.ok) throw new Error('snap ' + r.status);
@@ -1426,6 +1523,7 @@ function pollWristLive() {
     })
     .then(blob => {
       if (!blob || blob.size < 80) throw new Error('empty');
+      wristSnapMiss = 0;
       const img = $('#wristImg');
       const ph = $('#wristPlaceholder');
       const nextUrl = URL.createObjectURL(blob);
@@ -1438,7 +1536,24 @@ function pollWristLive() {
       img.style.display = 'block';
       if (ph) ph.style.display = 'none';
     })
-    .catch(() => {})
+    .catch(() => {
+      wristSnapMiss += 1;
+      if (wristSnapMiss < 16) return;
+      const img = $('#wristImg');
+      const ph = $('#wristPlaceholder');
+      if (wristSnapUrl) {
+        URL.revokeObjectURL(wristSnapUrl);
+        wristSnapUrl = '';
+      }
+      if (img) {
+        img.removeAttribute('src');
+        img.style.display = 'none';
+      }
+      if (ph) {
+        ph.style.display = 'block';
+        ph.textContent = 'NO LIVE FRAME · 画面已停更';
+      }
+    })
     .finally(() => { wristSnapBusy = false; });
 }
 
@@ -1594,20 +1709,20 @@ $('#btnRouteStart').onclick = async () => {
 $('#btnQrStart').onclick = () => fetch('/api/vision/wrist_camera/detect/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(pollState);
 $('#btnQrStop').onclick = () => fetch('/api/vision/wrist_camera/detect/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(pollState);
 $('#btnLeoStart').onclick = () => {
-  showToast('正在启动连续识别（首次最多约 4 分钟）…', 'info', 8000);
+  showToast('正在启动 Leo 连续识别…', 'info', 4000);
   fetch('/api/vision/leo_face/continuous/start', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
-    signal: AbortSignal.timeout(250000),
+    signal: AbortSignal.timeout(20000),
   }).then(r => r.json()).then(j => {
     const ok = j.success === true || j.status === 'RUNNING' || j.status === 'ALREADY_RUNNING';
-    showToast(j.status || j.message || 'Leo SetBool(true)', ok ? 'ok' : 'err', 6000);
+    showToast(j.status || j.message || 'SetBool data:true', ok ? 'ok' : 'err', 6000);
     pollState();
   }).catch(() => showToast('Leo 连续识别启动超时', 'err'));
 };
 $('#btnLeoStop').onclick = () => fetch('/api/vision/leo_face/continuous/stop', {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
   signal: AbortSignal.timeout(15000),
-}).then(r => r.json()).then(j => { showToast(j.status || j.message || 'Leo SetBool(false)', j.success ? 'ok' : 'warn'); pollState(); })
+}).then(r => r.json()).then(j => { showToast(j.status || j.message || 'SetBool data:false', j.success ? 'ok' : 'warn'); pollState(); })
   .catch(() => showToast('Leo 停止超时', 'err'));
 
 $('#btnAddStation').onclick = () => {
@@ -1705,7 +1820,7 @@ document.getElementById('ctlLock')?.addEventListener('change', async (e) => {
 
 setInterval(pollHeartbeat, HEARTBEAT_MS);
 setInterval(pollState, STATE_POLL_MS);
-setInterval(pollWristLive, 250);
+setInterval(pollWristLive, 400);
 setInterval(pollRoute, 2000);
 bindVisionActions();
 pollHeartbeat();
@@ -1983,7 +2098,7 @@ function destroySystemMonitorWidget(card) {
 
 window.WIDGET_REGISTRY = {
   jason_camera_a: { title: '📷 Jason Camera-A', adopt: '#cardFloor', defaultW: 300, defaultH: 340, defaultX: 16, defaultY: 70 },
-  jason_camera_b: { title: '📷 Jason Camera-B', adopt: '#cardWrist', defaultW: 360, defaultH: 420, minW: 280, minH: 280, defaultX: 330, defaultY: 70 },
+  jason_camera_b: { title: '📷 Wrist Camera (Pylon 腕部)', adopt: '#cardWrist', defaultW: 360, defaultH: 420, minW: 280, minH: 280, defaultX: 330, defaultY: 70 },
   leo_camera: { title: '📷 Leo Camera', adopt: '#cardLeo', defaultW: 320, defaultH: 380, minW: 260, minH: 260, defaultX: 640, defaultY: 70 },
   arm_control: { title: '🤖 机械臂控制', defaultW: 320, defaultH: 420, defaultX: 16, defaultY: 420, init: (c) => initArmWidget(c), destroy: () => destroyArmWidget() },
   agv_status: { title: '🚗 AGV 状态', defaultW: 240, defaultH: 220, defaultX: 350, defaultY: 420, init: initAgvStatusWidget, destroy: destroyAgvStatusWidget },
@@ -2028,6 +2143,104 @@ if (document.readyState === 'loading') {
 } else {
   initWidgets();
 }
+
+const DOCKER_RESTART_CONTAINER = 'delivery_gazebo_soft';
+let restartComponentsCache = [];
+
+async function loadRestartComponents() {
+  try {
+    const j = await fetchJson('/api/restart/components');
+    restartComponentsCache = j.components || [];
+  } catch (e) {
+    restartComponentsCache = [];
+  }
+  return restartComponentsCache;
+}
+
+function openRestartComponentModal() {
+  const modal = $('#restartComponentModal');
+  const list = $('#restartComponentList');
+  if (!modal || !list) return;
+  list.innerHTML = '';
+  if (!restartComponentsCache.length) {
+    list.innerHTML = '<div class="st-meta">暂无可重启的关联件</div>';
+  } else {
+    restartComponentsCache.forEach((c) => {
+      const row = document.createElement('div');
+      row.className = 'restart-item';
+      row.innerHTML = `
+        <div>
+          <div class="restart-item-label">${c.label || c.name}</div>
+          <div class="restart-item-meta">${c.name}</div>
+        </div>
+        <button type="button" class="btn btn-sm primary">重启</button>
+      `;
+      const btn = row.querySelector('button');
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!confirm(`确定要重启「${c.label || c.name}」吗？`)) return;
+        btn.disabled = true;
+        btn.textContent = '重启中…';
+        try {
+          const res = await fetch('/api/restart/component', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: c.name }),
+          }).then((r) => r.json());
+          showToast(res.message || (res.success ? '重启成功' : '重启失败'), res.success ? 'ok' : 'err');
+          if (window.AlertQueue) {
+            window.AlertQueue.notifyFromResult('restart', res, 'info', 'error');
+          }
+        } catch (err) {
+          showToast('重启请求失败: ' + err.message, 'err');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '重启';
+          modal.classList.remove('show');
+        }
+      });
+      list.appendChild(row);
+    });
+  }
+  modal.classList.add('show');
+}
+
+$('#btnRestartComponent')?.addEventListener('click', async () => {
+  await loadRestartComponents();
+  openRestartComponentModal();
+});
+$('#btnRestartComponentCancel')?.addEventListener('click', () => {
+  $('#restartComponentModal')?.classList.remove('show');
+});
+
+$('#btnRestartDocker')?.addEventListener('click', () => {
+  const msg = $('#restartDockerMsg');
+  if (msg) {
+    msg.textContent = `确定要重启容器「${DOCKER_RESTART_CONTAINER}」吗？重启期间 Dashboard 将短暂不可用。`;
+  }
+  $('#restartDockerModal')?.classList.add('show');
+});
+$('#btnRestartDockerCancel')?.addEventListener('click', () => {
+  $('#restartDockerModal')?.classList.remove('show');
+});
+$('#btnRestartDockerConfirm')?.addEventListener('click', async () => {
+  const btn = $('#btnRestartDockerConfirm');
+  if (btn) { btn.disabled = true; btn.textContent = '正在重启…'; }
+  try {
+    const res = await fetch('/api/restart/docker', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ container: DOCKER_RESTART_CONTAINER }),
+    }).then((r) => r.json());
+    showToast(res.message || '已发送重启命令', res.success ? 'ok' : 'err');
+    $('#restartDockerModal')?.classList.remove('show');
+    setTimeout(() => { window.location.reload(); }, 8000);
+  } catch (err) {
+    showToast('Docker 重启请求失败: ' + err.message, 'err');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '确认重启'; }
+  }
+});
 </script>
 </body>
 </html>

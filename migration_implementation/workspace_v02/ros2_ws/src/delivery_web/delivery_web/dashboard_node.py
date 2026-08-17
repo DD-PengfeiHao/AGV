@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import threading
 import time
 import uuid
@@ -75,8 +76,30 @@ except Exception:  # noqa: BLE001
     RobokitError = Exception  # type: ignore
 
 
-VERSION = "0.5.0"
+VERSION = "0.52.0"
 WEB_FACE_API = 1
+
+FATAL_CODE_MAP: Dict[int, str] = {
+    50103: "定位丢失，请重新定位",
+    50104: "急停被按下",
+    50106: "地图格式无效，导航无法规划路径",
+    50107: "路径规划失败",
+}
+
+DOCKER_RESTART_WHITELIST = (
+    "delivery_gazebo_soft",
+    "delivery_gazebo_soft_full",
+    "delivery_gazebo_gpu",
+)
+
+RESTART_COMPONENTS: Dict[str, Dict[str, str]] = {
+    "keyence": {"label": "Keyence 地面扫码", "group": "stack"},
+    "jason_camera": {"label": "Jason 腕部相机", "group": "stack"},
+    "wrist_qr": {"label": "腕部二维码检测", "group": "stack"},
+    "wrist_apriltag": {"label": "腕部 AprilTag", "group": "stack"},
+    "leo_face": {"label": "Leo 人脸识别", "group": "leo"},
+    "pick_place": {"label": "机械臂抓取服务", "group": "shell"},
+}
 DEFAULT_FACE_PEER = os.environ.get("FACE_JETSON_IP", "192.168.0.225")
 DEFAULT_DEMO_AGV = os.environ.get("DEMO_AGV_HOST", "192.168.18.198")
 CAMERAS_META = {
@@ -241,6 +264,7 @@ def _rgb8_to_jpeg(msg: Image) -> Optional[bytes]:
     if not parsed:
         return None
     w, h, rgb = parsed
+    max_w = 800
     # 1) Pillow JPEG
     try:
         from io import BytesIO
@@ -248,8 +272,11 @@ def _rgb8_to_jpeg(msg: Image) -> Optional[bytes]:
         from PIL import Image as PILImage  # type: ignore
 
         im = PILImage.frombytes("RGB", (w, h), rgb)
+        if im.width > max_w:
+            nh = max(1, int(im.height * max_w / im.width))
+            im = im.resize((max_w, nh))
         buf = BytesIO()
-        im.save(buf, format="JPEG", quality=55)
+        im.save(buf, format="JPEG", quality=50)
         return buf.getvalue()
     except Exception:  # noqa: BLE001
         pass
@@ -349,6 +376,8 @@ class DashboardNode(Node):
             self._env["use_sim_cameras"] = False
         self._env["mode"] = "demo"
         self._device_cfg = DeviceConfig.load()
+        os.environ.setdefault("ROS_DOMAIN_ID", str(self._device_cfg.ros_domain_id))
+        os.environ.setdefault("RMW_IMPLEMENTATION", "rmw_fastrtps_cpp")
         self._agv_adapter: Any = None
         self._control_locked = False
         self._control_wanted = True
@@ -473,7 +502,11 @@ class DashboardNode(Node):
         )
         self._init_adapter()
         if self._env.get("mode") in ("demo", "mock"):
-            self._ensure_adapter(str(self._env.get("agv_host") or DEFAULT_DEMO_AGV))
+            threading.Thread(
+                target=self._boot_adapter_connect,
+                daemon=True,
+                name="boot-adapter-connect",
+            ).start()
             threading.Thread(target=self._boot_map_sync, daemon=True).start()
 
         self.create_subscription(AgvStatus, "agv/status", self._on_agv, 10)
@@ -580,8 +613,7 @@ class DashboardNode(Node):
         threading.Thread(target=self._leo_autostart, daemon=True).start()
 
     def _leo_autostart(self) -> None:
-        # SOP §8.1: subscribe (already done in bridge ctor), then SetBool(true).
-        # First start may take up to 240s (models + Basler). Do not touch Jason.
+        # Same command as Leo: SetBool {data: true} on /face/cam_front/continuous_recognition.
         time.sleep(2.0)
         try:
             out = self._get_vision().leo_ensure_continuous()
@@ -626,6 +658,288 @@ class DashboardNode(Node):
         except Exception:  # noqa: BLE001
             return {}
 
+    def _alert_item(
+        self,
+        level: str,
+        source: str,
+        code: str,
+        message: str,
+        raw: str,
+    ) -> Dict[str, Any]:
+        return {
+            "level": level,
+            "source": source,
+            "code": code,
+            "message": message,
+            "raw": raw,
+        }
+
+    def _agv_for_alerts(self) -> Dict[str, Any]:
+        agv = dict(self._state.get("agv") or {})
+        try:
+            adapter = self._agv_adapter
+            if adapter is not None and hasattr(adapter, "diagnose"):
+                rs = adapter.diagnose()
+                agv.update(rs.agv_state_dict(agv))
+        except Exception:  # noqa: BLE001
+            pass
+        return agv
+
+    def _collect_system_alerts(self) -> List[Dict[str, Any]]:
+        alerts: List[Dict[str, Any]] = []
+        arm = dict(getattr(self, "_arm_cache", None) or {})
+        vision = self._vision_snapshot()
+        agv = self._agv_for_alerts()
+
+        if arm.get("arm_mode") == "real" and not arm.get("online"):
+            alerts.append(self._alert_item(
+                "error", "arm", "ARM_OFFLINE",
+                "机械臂离线，请检查 xarm7_real 容器",
+                "pick_place_server not reachable on DDS",
+            ))
+        if arm.get("state") == "error":
+            raw = str(arm.get("state_text") or "")
+            alerts.append(self._alert_item(
+                "error", "arm", "ARM_ERROR",
+                raw or "机械臂故障",
+                raw or "state=error",
+            ))
+        if arm.get("motion_blocked"):
+            raw = str(arm.get("motion_block_reason") or "真机运动未启用")
+            alerts.append(self._alert_item(
+                "warning", "arm", "ARM_MOTION_BLOCKED",
+                raw,
+                raw,
+            ))
+        if arm.get("op_running"):
+            kind = str(arm.get("op_kind") or "动作")
+            labels = {"unlock": "解锁归位", "pick_place": "抓取", "gripper": "夹爪"}
+            msg = labels.get(kind, kind)
+            alerts.append(self._alert_item(
+                "info", "arm", "ARM_RUNNING",
+                f"机械臂正在执行: {msg}",
+                f"op_kind={kind}",
+            ))
+        lr = arm.get("last_op_result") or arm.get("last_result")
+        if isinstance(lr, dict) and lr and lr.get("success") is False:
+            raw = str(lr.get("message") or "机械臂操作失败")
+            alerts.append(self._alert_item(
+                "error", "arm", "ARM_OP_FAIL",
+                raw,
+                raw,
+            ))
+
+        leo = vision.get("leo_face") or {}
+        leo_st = str(leo.get("status") or "").upper()
+        leo_msg = str(leo.get("message") or "")
+        if leo_st == "OFFLINE":
+            alerts.append(self._alert_item(
+                "error", "camera", "LEO_OFFLINE",
+                leo_msg or "Leo 人脸识别离线",
+                leo_msg or "status=OFFLINE",
+            ))
+        elif leo_st == "READY" and leo_msg:
+            alerts.append(self._alert_item(
+                "info", "camera", "LEO_READY",
+                leo_msg,
+                leo_msg,
+            ))
+        elif leo_msg and leo_st not in ("ONLINE", ""):
+            alerts.append(self._alert_item(
+                "warning", "camera", "LEO_STATUS",
+                leo_msg,
+                f"status={leo_st}",
+            ))
+
+        wrist = vision.get("wrist_camera") or {}
+        wrist_msg = str(wrist.get("message") or wrist.get("status") or "")
+        if wrist.get("online") is False:
+            alerts.append(self._alert_item(
+                "warning", "camera", "WRIST_OFFLINE",
+                wrist_msg or "腕部相机离线",
+                wrist_msg or "online=false",
+            ))
+        elif wrist_msg and "error" in wrist_msg.lower():
+            alerts.append(self._alert_item(
+                "error", "camera", "WRIST_ERROR",
+                wrist_msg,
+                wrist_msg,
+            ))
+
+        floor = vision.get("floor_qr_scanner") or {}
+        floor_msg = str(floor.get("message") or floor.get("last_error") or "")
+        if floor.get("online") is False:
+            alerts.append(self._alert_item(
+                "warning", "camera", "FLOOR_QR_OFFLINE",
+                floor_msg or "地面扫码器离线",
+                floor_msg or "online=false",
+            ))
+
+        if agv.get("emergency") or agv.get("estop"):
+            alerts.append(self._alert_item(
+                "error", "agv", "AGV_ESTOP",
+                "AGV 急停激活",
+                "emergency=true",
+            ))
+
+        if agv.get("manualBlock") or agv.get("manual_block"):
+            station = agv.get("current_station") or ""
+            alerts.append(self._alert_item(
+                "error", "agv", "AGV_MANUAL_BLOCK",
+                "AGV 处于手动锁定状态，请切换到自动模式",
+                f"manualBlock=true, station={station}",
+            ))
+
+        block = str(agv.get("block_reason") or agv.get("blocked_reason") or "")
+        if block and block not in ("0", "None"):
+            alerts.append(self._alert_item(
+                "warning", "agv", "AGV_BLOCKED",
+                f"AGV 阻挡: {block}",
+                f"block_reason={block}",
+            ))
+
+        task_status = int(agv.get("task_status", 0) or 0)
+        r_vx = float(agv.get("r_vx", 0) or 0)
+        if task_status == 2 and abs(r_vx) < 0.01:
+            target = agv.get("target_id") or ""
+            alerts.append(self._alert_item(
+                "warning", "agv", "AGV_NOT_MOVING",
+                "导航任务运行中但车辆未移动",
+                f"task_status=2, r_vx=0, target={target}",
+            ))
+
+        fatals = agv.get("fatals") or []
+        if isinstance(fatals, list):
+            for item in fatals[:5]:
+                if isinstance(item, dict):
+                    code = int(item.get("code") or 0)
+                    raw_desc = str(item.get("desc") or item.get("describe") or item.get("message") or "")
+                    cn_msg = FATAL_CODE_MAP.get(code, f"AGV致命错误 {code}")
+                    alerts.append(self._alert_item(
+                        "error", "agv", f"FATAL_{code}",
+                        cn_msg,
+                        f"{code}: {raw_desc}",
+                    ))
+                else:
+                    alerts.append(self._alert_item(
+                        "error", "agv", "AGV_FATAL",
+                        str(item),
+                        str(item),
+                    ))
+
+        msi = agv.get("move_status_info")
+        if msi:
+            try:
+                msi_data = json.loads(msi) if isinstance(msi, str) else msi
+                if isinstance(msi_data, dict):
+                    cnt = (msi_data.get("dispatch_self") or {}).get("cnt", 0)
+                    if int(cnt or 0) > 0:
+                        alerts.append(self._alert_item(
+                            "info", "agv", "AGV_DISPATCH",
+                            "调度锁等待中",
+                            f"dispatch_self.cnt={cnt}",
+                        ))
+            except Exception:  # noqa: BLE001
+                pass
+
+        if int(agv.get("tracking_status", 0) or 0) == 1 and task_status == 2:
+            alerts.append(self._alert_item(
+                "info", "agv", "AGV_TRACKING",
+                "路径跟踪中",
+                f"tracking_status=1, target={agv.get('target_id') or ''}",
+            ))
+
+        agv_warnings = agv.get("warnings") or []
+        if isinstance(agv_warnings, list):
+            for item in agv_warnings[:3]:
+                if isinstance(item, dict):
+                    wcode = str(item.get("code") or item.get("id") or "AGV_WARN")
+                    wdesc = str(item.get("desc") or item.get("describe") or item.get("message") or wcode)
+                else:
+                    wcode = "AGV_WARN"
+                    wdesc = str(item)
+                alerts.append(self._alert_item(
+                    "warning", "agv", wcode,
+                    wdesc,
+                    wdesc,
+                ))
+
+        return alerts[:16]
+
+    def list_restart_components(self) -> Dict[str, Any]:
+        items = []
+        for key, meta in RESTART_COMPONENTS.items():
+            items.append({
+                "name": key,
+                "label": meta.get("label", key),
+                "group": meta.get("group", "stack"),
+            })
+        return {"success": True, "components": items}
+
+    def restart_component(self, name: str) -> Dict[str, Any]:
+        name = str(name or "").strip()
+        meta = RESTART_COMPONENTS.get(name)
+        if not meta:
+            return {"success": False, "message": f"未知关联件: {name}"}
+        group = meta.get("group", "stack")
+        try:
+            if group == "stack":
+                out = self._stack_supervisor.restart_component(name)
+                return out
+            if group == "leo":
+                self._get_vision().leo_set_continuous(False)
+                time.sleep(0.5)
+                out = self._get_vision().leo_set_continuous(True)
+                return {
+                    "success": bool(out.get("success")),
+                    "message": str(out.get("message") or out.get("status") or "Leo 已重启"),
+                }
+            if group == "shell" and name == "pick_place":
+                cmd = [
+                    "docker", "exec", "xarm7_real", "bash", "-lc",
+                    "pkill -f pick_place_server || true",
+                ]
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10.0)
+                ok = proc.returncode == 0
+                return {
+                    "success": ok,
+                    "message": "已发送 pick_place_server 重启信号（需在 xarm7_real 内确认节点恢复）",
+                    "detail": (proc.stdout or proc.stderr or "").strip(),
+                }
+            return {"success": False, "message": f"未配置重启方式: {name}"}
+        except subprocess.TimeoutExpired:
+            return {"success": False, "message": f"重启 {name} 超时（10s）"}
+        except Exception as exc:  # noqa: BLE001
+            return {"success": False, "message": f"重启失败: {exc}"}
+
+    def restart_docker(self, container: str) -> Dict[str, Any]:
+        container = str(container or "delivery_gazebo_soft").strip()
+        if container not in DOCKER_RESTART_WHITELIST:
+            return {
+                "success": False,
+                "message": f"容器不在白名单: {container}",
+                "allowed": list(DOCKER_RESTART_WHITELIST),
+            }
+
+        def _worker() -> None:
+            time.sleep(0.5)
+            try:
+                subprocess.run(
+                    ["docker", "restart", container],
+                    capture_output=True,
+                    text=True,
+                    timeout=120.0,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+        threading.Thread(target=_worker, daemon=True, name="docker-restart").start()
+        return {
+            "success": True,
+            "message": f"正在重启容器 {container}，Dashboard 将短暂不可用",
+            "container": container,
+        }
+
     def _get_stations_dict(self) -> Dict[str, Dict[str, float]]:
         with self._lock:
             return dict(self._state.get("stations") or {})
@@ -637,6 +951,14 @@ class DashboardNode(Node):
         if ts == 2 and abs(spd) > 0.05:
             return True
         return ts in (3,)
+
+    def _boot_adapter_connect(self) -> None:
+        time.sleep(0.3)
+        try:
+            host = str(self._env.get("agv_host") or DEFAULT_DEMO_AGV)
+            self._ensure_adapter(host)
+        except Exception as exc:  # noqa: BLE001
+            self.get_logger().warn(f"boot adapter connect failed: {exc}")
 
     def _boot_map_sync(self) -> None:
         time.sleep(0.8)
@@ -722,11 +1044,19 @@ class DashboardNode(Node):
         if self._arm_manager is None:
             from delivery_web.arm.manager import ArmManager
 
-            robot_ip = str(getattr(self._device_cfg, "xarm_robot_ip", "172.31.0.123"))
+            cfg = self._device_cfg
             self._arm_manager = ArmManager(
                 self,
                 get_env_mode=lambda: str(self._env.get("mode", "dev")),
-                robot_ip=robot_ip,
+                robot_ip=str(getattr(cfg, "xarm_robot_ip", "172.31.0.123")),
+                default_arm_mode=str(getattr(cfg, "xarm_default_mode", "simulation")),
+                allow_real_motion=bool(getattr(cfg, "xarm_allow_real_motion", False)),
+                service_unlock=str(getattr(cfg, "xarm_service_unlock", "/unlock_and_home")),
+                service_pick_place=str(getattr(cfg, "xarm_service_pick_place", "/do_pick_place")),
+                service_gripper=str(getattr(cfg, "xarm_service_gripper", "/set_gripper")),
+                ros_state_topic=str(getattr(cfg, "xarm_ros_state_topic", "/pick_place_state")),
+                ros_joint_topic=str(getattr(cfg, "xarm_ros_joint_topic", "/joint_states")),
+                ros_domain_id=int(getattr(cfg, "ros_domain_id", 30)),
                 get_agv_busy=self._agv_nav_busy,
             )
         return self._arm_manager
@@ -1463,6 +1793,7 @@ class DashboardNode(Node):
             out["vision"] = vision
             arm_cached = getattr(self, "_arm_cache", None) or {}
             out["arm"] = arm_cached if arm_cached else {}
+            out["alerts"] = self._collect_system_alerts()
             out["devices"] = self._device_cfg.public_dict()
             return out
 
@@ -1798,6 +2129,15 @@ class DashboardNode(Node):
             self.get_logger().warn(f"agv status poll failed: {exc}")
 
     def _laser_tick(self) -> None:
+        if getattr(self, "_laser_busy", False):
+            return
+        self._laser_busy = True
+        try:
+            self._laser_tick_inner()
+        finally:
+            self._laser_busy = False
+
+    def _laser_tick_inner(self) -> None:
         mode = self._env.get("mode", "dev")
         if mode in ("demo", "mock") and self._agv_adapter is not None and self._agv_adapter.connected:
             try:
@@ -1888,6 +2228,95 @@ class DashboardNode(Node):
                 camera_info=info,
                 hz=hz,
             )
+
+    def diag_snapshot(self) -> Dict[str, Any]:
+        """GET /api/diag/snapshot — read-only Robokit diagnostic. Does not navigate."""
+        ts = time.time()
+        env = self._public_env() if hasattr(self, "_public_env") else (self._state.get("env") or {})
+        host = str(env.get("agv_host") or env.get("robokit_host") or "")
+        adapter = self._agv_adapter
+        if adapter is None or not getattr(adapter, "connected", False):
+            return {
+                "success": False,
+                "message": "adapter not connected",
+                "timestamp": ts,
+                "snapshot": {
+                    "timestamp": ts,
+                    "robot_ip": host,
+                    "diag_source": None,
+                },
+            }
+        try:
+            if not hasattr(adapter, "diagnose"):
+                return {"success": False, "message": "adapter has no diagnose()", "timestamp": ts}
+            state = adapter.diagnose()
+            diag = state.agv_state_dict()
+        except Exception as exc:  # noqa: BLE001
+            return {"success": False, "message": f"diagnose failed: {exc}", "timestamp": ts}
+
+        reloc = diag.get("reloc_status")
+        if reloc is None and hasattr(adapter, "get_reloc_status"):
+            try:
+                reloc = (adapter.get_reloc_status() or {}).get("reloc_status")
+            except Exception:  # noqa: BLE001
+                reloc = None
+        loadmap = diag.get("loadmap_status")
+        if loadmap is None and hasattr(adapter, "get_map_load_status"):
+            try:
+                loadmap = (adapter.get_map_load_status() or {}).get("loadmap_status")
+            except Exception:  # noqa: BLE001
+                loadmap = None
+
+        snapshot = {
+            "timestamp": ts,
+            "robot_ip": host or str(getattr(adapter, "host", "") or ""),
+            "diag_source": diag.get("diag_source"),
+            "navigation": {
+                "task_status": diag.get("task_status"),
+                "task_type": diag.get("task_type"),
+                "target_id": diag.get("target_id"),
+                "finished_path": diag.get("finished_path"),
+                "unfinished_path": diag.get("unfinished_path"),
+                "move_status_info": diag.get("move_status_info"),
+            },
+            "motion": {
+                "vx": diag.get("vx"),
+                "vy": diag.get("vy"),
+                "w": diag.get("w"),
+                "r_vx": diag.get("r_vx"),
+                "r_vy": diag.get("r_vy"),
+                "r_w": diag.get("r_w"),
+                "is_stop": diag.get("is_stop"),
+            },
+            "control": {"current_lock": diag.get("current_lock")},
+            "dispatch": {
+                "dispatch_mode": diag.get("dispatch_mode"),
+                "connect_fleet": diag.get("connect_fleet"),
+            },
+            "safety": {
+                "block_reason": diag.get("block_reason"),
+                "brake": diag.get("brake"),
+                "emergency": diag.get("emergency"),
+                "soft_emc": diag.get("soft_emc"),
+                "driver_emc": diag.get("driver_emc"),
+                "manual_charge": diag.get("manual_charge"),
+            },
+            "motor": diag.get("motor_info"),
+            "alarms": {
+                "errors": diag.get("errors"),
+                "fatals": diag.get("fatals"),
+                "warnings": diag.get("warnings"),
+            },
+            "meta": {
+                "current_map": diag.get("current_map"),
+                "vehicle_id": diag.get("vehicle_id"),
+                "reloc_status": reloc,
+                "loadmap_status": loadmap,
+                "confidence": diag.get("confidence"),
+                "current_station": diag.get("current_station"),
+            },
+        }
+        return {"success": True, "snapshot": snapshot}
 
     def camera_diag(self) -> Dict[str, Any]:
         with self._lock:
@@ -2536,7 +2965,7 @@ class DashboardNode(Node):
                     ms = int((time.time() - t0) * 1000)
                     if not jpg:
                         node._vlog.log_request("camera", "GET", "/api/jason/camera/snapshot", 404, ms)
-                        self._json(404, {"error": "no frame"})
+                        self._json(404, {"error": "no live frame", "stale": True})
                         return
                     node._vlog.log_request(
                         "camera", "GET", "/api/jason/camera/snapshot", 200, ms,
@@ -2570,16 +2999,15 @@ class DashboardNode(Node):
                     now = time.time()
                     with node._wrist_snap_lock:
                         ts, cached = node._wrist_snap_cached
-                        if cached and (now - ts) < 0.3:
+                        if cached and (now - ts) < 0.15:
                             jpg = cached
                         else:
                             jpg = node._get_vision().wrist_snapshot() or b""
-                            if jpg:
-                                node._wrist_snap_cached = (now, jpg)
+                            node._wrist_snap_cached = (now, jpg) if jpg else (0.0, b"")
                     ms = int((time.time() - t0) * 1000)
                     if not jpg:
                         node._vlog.log_request("camera", "GET", "/api/vision/wrist_camera/snapshot", 404, ms)
-                        self._json(404, {"error": "no frame"})
+                        self._json(404, {"error": "no live frame", "stale": True})
                         return
                     node._vlog.log_request(
                         "camera", "GET", "/api/vision/wrist_camera/snapshot", 200, ms,
@@ -2592,6 +3020,9 @@ class DashboardNode(Node):
                     return
                 if path == "/api/stack/status":
                     self._json(200, node._stack_supervisor.status())
+                    return
+                if path == "/api/restart/components":
+                    self._json(200, node.list_restart_components())
                     return
                 if path == "/api/arm/status":
                     try:
@@ -2705,6 +3136,9 @@ class DashboardNode(Node):
                 if path == "/api/diag/cameras":
                     self._json(200, node.camera_diag())
                     return
+                if path == "/api/diag/snapshot":
+                    self._json(200, node.diag_snapshot())
+                    return
                 if path == "/api/sim/maps":
                     self._json(200, node.list_maps())
                     return
@@ -2725,7 +3159,7 @@ class DashboardNode(Node):
                             "version": VERSION,
                             "project": "delivery-ros2",
                             "stack": "gazebo-v02",
-                            "freeze": "v0.2.0",
+                            "freeze": "v0.50-frozen",
                             "ports": node._state.get("ports"),
                             "ui": mode,
                             "web_face_api": WEB_FACE_API,
@@ -2932,12 +3366,33 @@ class DashboardNode(Node):
                 if path == "/api/stack/ensure":
                     self._json(200, node._stack_supervisor.ensure_all(force=True))
                     return
+                if path == "/api/restart/component":
+                    name = str(payload.get("name", "")).strip()
+                    if not name:
+                        self._json(400, {"success": False, "message": "name required"})
+                        return
+                    self._json(200, node.restart_component(name))
+                    return
+                if path == "/api/restart/docker":
+                    container = str(payload.get("container", "delivery_gazebo_soft")).strip()
+                    self._json(200, node.restart_docker(container))
+                    return
                 if path == "/api/arm/command":
                     self._json(200, node._get_arm().command(payload))
                     return
                 if path == "/api/arm/mode":
                     mode = str(payload.get("mode", "simulation"))
                     self._json(200, node._get_arm().set_arm_mode(mode))
+                    return
+                if path == "/api/arm/motion":
+                    enabled = payload.get("enabled")
+                    if enabled is None:
+                        enabled = payload.get("real_motion_enabled")
+                    if enabled is None:
+                        self._json(400, {"success": False, "message": "enabled (bool) required"})
+                        return
+                    node._vlog.log("arm", "POST /api/arm/motion", payload)
+                    self._json(200, node._get_arm().set_real_motion(bool(enabled)))
                     return
                 if path == "/api/arm/unlock":
                     node._vlog.log("arm", "POST /api/arm/unlock", payload)

@@ -19,6 +19,7 @@ from delivery_web.vision.models import DetectionResult, WristCameraStatus
 from delivery_web.vision.ros_probe import RosTopicProbe, ping_host, ros_env
 
 OFFLINE_SEC = 8.0
+LIVE_FRAME_SEC = 8.0  # drop last JPEG only after ROS really stops, not after a slow encode
 
 
 class WristCameraBridge:
@@ -40,12 +41,16 @@ class WristCameraBridge:
         self._qr_lock = threading.Lock()
         self._jpeg: Optional[bytes] = None
         self._last_frame = 0.0
+        self._last_ros = 0.0
+        self._pending_raw = None
+        self._raw_stop = False
         self._width = 0
         self._height = 0
         self._encoding = ""
         self._fps = 0.0
         self._frame_times: deque = deque(maxlen=60)
         self._qr_running = False
+        self._qr_busy = False
         self._qr_proc: Optional[subprocess.Popen] = None
         self._detections: List[DetectionResult] = []
         self._last_qr = ""
@@ -64,30 +69,29 @@ class WristCameraBridge:
             domain_id=self._cfg.ros_domain_id,
         )
         cg = getattr(node, "_cg", None)
-        topics = [self._cfg.wrist_camera_image_topic] + list(self._cfg.wrist_camera_image_topic_candidates or [])
-        seen = set()
-        for topic in topics:
-            t = str(topic or "").strip()
-            if not t or t in seen:
-                continue
-            seen.add(t)
-            node.create_subscription(
-                Image,
-                t,
-                self._on_img,
-                qos_profile_sensor_data,
-                callback_group=cg,
-            )
-            self._log(f"Wrist camera subscribe Image {t} (BEST_EFFORT)")
         comp = str(self._cfg.wrist_camera_compressed_topic or "").strip()
+        if not comp:
+            img_t = str(self._cfg.wrist_camera_image_topic or "")
+            if img_t.endswith("/image_raw"):
+                comp = img_t + "/compressed"
+        # Preview MUST use compressed JPEG. Encoding 5MP raw on the ROS executor
+        # stalls HTTP (arm timeout) and eventually kills the live view.
         if comp:
+            reliable = QoSProfile(depth=5, reliability=ReliabilityPolicy.RELIABLE)
+            for qos, _label in ((qos_profile_sensor_data, "BEST_EFFORT"), (reliable, "RELIABLE")):
+                node.create_subscription(
+                    CompressedImage, comp, self._on_compressed, qos, callback_group=cg
+                )
+            self._log(f"Wrist camera subscribe CompressedImage {comp} BEST_EFFORT+RELIABLE")
+        # Pylon on this NUC currently has 0 compressed publishers — preview uses raw
+        # on a worker thread (never encode on the ROS executor).
+        t = str(self._cfg.wrist_camera_image_topic or "").strip()
+        if t:
             node.create_subscription(
-                CompressedImage,
-                comp,
-                self._on_compressed,
-                qos_profile_sensor_data,
-                callback_group=cg,
+                Image, t, self._on_img, qos_profile_sensor_data, callback_group=cg
             )
+            self._log(f"Wrist camera subscribe Image {t} (worker encode, drop-old)")
+        threading.Thread(target=self._raw_encode_loop, daemon=True).start()
         # Reliable for String decode topics
         str_qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
         node.create_subscription(
@@ -150,6 +154,7 @@ class WristCameraBridge:
         now = time.time()
         with self._lock:
             self._last_frame = now
+            self._last_ros = now
             self._width = int(width)
             self._height = int(height)
             self._encoding = encoding
@@ -159,7 +164,7 @@ class WristCameraBridge:
                 if span > 0:
                     self._fps = (len(self._frame_times) - 1) / span
             self._jpeg = jpg
-        self._maybe_local_qr(jpg)
+        self._maybe_local_qr_async(jpg)
 
     def _apply_qr_text(self, text: str) -> None:
         text = (text or "").strip()
@@ -199,22 +204,78 @@ class WristCameraBridge:
                 self._log(f"local QR decode unavailable: {exc}")
         return ""
 
-    def _maybe_local_qr(self, jpg: bytes) -> None:
+    def _maybe_local_qr_async(self, jpg: bytes) -> None:
         now = time.time()
-        if now - self._last_local_qr_try < 0.45:
+        if now - self._last_local_qr_try < 0.8:
+            return
+        if self._qr_busy:
             return
         self._last_local_qr_try = now
-        text = self._decode_qr_jpeg(jpg)
-        if text:
-            self._apply_qr_text(text)
+        self._qr_busy = True
+
+        def _run() -> None:
+            try:
+                text = self._decode_qr_jpeg(jpg)
+                if text:
+                    self._apply_qr_text(text)
+            finally:
+                self._qr_busy = False
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _raw_encode_loop(self) -> None:
+        while not self._raw_stop:
+            payload = None
+            with self._lock:
+                payload = self._pending_raw
+                self._pending_raw = None
+            if payload is None:
+                time.sleep(0.02)
+                continue
+            try:
+                jpg = self._encode_payload(payload)
+                self._store_jpeg(jpg, int(payload.get("w") or 0), int(payload.get("h") or 0), str(payload.get("enc") or "raw"))
+            except Exception:  # noqa: BLE001
+                time.sleep(0.05)
+
+    def _encode_payload(self, payload: Dict[str, Any]) -> Optional[bytes]:
+        class _Tmp:
+            pass
+
+        tmp = _Tmp()
+        tmp.width = int(payload.get("w") or 0)
+        tmp.height = int(payload.get("h") or 0)
+        tmp.encoding = str(payload.get("enc") or "rgb8")
+        tmp.data = payload.get("data") or b""
+        tmp.step = int(payload.get("step") or 0)
+        return self._encode_jpeg(tmp)
 
     def _on_img(self, msg: Image) -> None:
         self._msg_received = True
-        jpg = self._encode_jpeg(msg)
-        self._store_jpeg(jpg, int(msg.width), int(msg.height), str(msg.encoding or "raw"))
+        now = time.time()
+        with self._lock:
+            self._last_ros = now
+            if self._pending_raw is not None:
+                return
+            if self._jpeg and (now - self._last_frame) < 0.35:
+                return
+        try:
+            data = bytes(msg.data)
+        except Exception:  # noqa: BLE001
+            return
+        with self._lock:
+            self._pending_raw = {
+                "w": int(msg.width),
+                "h": int(msg.height),
+                "enc": str(msg.encoding or ""),
+                "step": int(getattr(msg, "step", 0) or 0),
+                "data": data,
+            }
 
     def _on_compressed(self, msg: CompressedImage) -> None:
         self._msg_received = True
+        with self._lock:
+            self._last_ros = time.time()
         fmt = (msg.format or "").lower()
         data = bytes(msg.data)
         if not data:
@@ -424,9 +485,20 @@ class WristCameraBridge:
             frame,
         )
 
-    def latest_jpeg(self) -> Optional[bytes]:
+    def latest_jpeg(self, max_age_sec: float = LIVE_FRAME_SEC) -> Optional[bytes]:
+        now = time.time()
         with self._lock:
-            return self._jpeg
+            jpg = self._jpeg
+            last = float(self._last_frame or 0.0)
+            last_ros = float(self._last_ros or 0.0)
+        if not jpg or len(jpg) < 80:
+            return None
+        newest = max(last, last_ros)
+        if newest <= 0:
+            return None
+        if (now - newest) > float(max_age_sec) and (now - last) > float(max_age_sec):
+            return None
+        return jpg
 
     def _network_online(self) -> bool:
         now = time.time()
@@ -465,6 +537,7 @@ class WristCameraBridge:
             qr_running = self._qr_running
             dets = list(self._detections)
             last = self._last_frame
+            last_ros = float(self._last_ros or 0.0)
             has_jpeg = self._jpeg is not None and len(self._jpeg or b"") > 100
             last_qr = self._last_qr
             last_tag = self._last_apriltag
@@ -472,8 +545,9 @@ class WristCameraBridge:
             msg_rx = self._msg_received
         ros_pub = msg_rx or has_jpeg or self._topic_probe.publisher_count() >= 1
         net = self._network_online()
-        age_ms = int((now - last) * 1000) if last > 0 else None
-        image_ok = has_jpeg and last > 0 and (now - last) <= OFFLINE_SEC
+        live_ref = max(last, last_ros)
+        age_ms = int((now - live_ref) * 1000) if live_ref > 0 else None
+        image_ok = has_jpeg and live_ref > 0 and (now - live_ref) <= LIVE_FRAME_SEC
         st = self._cam_status()
         display = st
         if st == "OFFLINE":

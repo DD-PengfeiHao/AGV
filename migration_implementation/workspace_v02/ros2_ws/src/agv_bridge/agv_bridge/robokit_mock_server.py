@@ -34,8 +34,14 @@ PORT_PUSH = 19301
 API_LOC = 1004
 API_BATTERY = 1007
 API_LASER = 1009
+API_SPEED = 1005
+API_BLOCK = 1006
+API_EMERGENCY = 1012
 API_TASK = 1020
 API_RELOC_STATUS = 1021
+API_MAP_LOAD = 1022
+API_CONTROL_OWNER = 1060
+API_BATCH = 1100
 API_RELOC = 2002
 API_CONFIRM_LOC = 2003
 API_CANCEL_RELOC = 2004
@@ -46,6 +52,7 @@ API_LOCK = 4005
 API_UNLOCK = 4006
 API_MAP = 1300
 API_STATION = 1301
+API_PATH_QUERY = 1303
 API_SWITCH_MAP = 2022
 API_UPLOAD_SWITCH = 2025
 API_UPLOAD_MAP = 4010
@@ -100,6 +107,30 @@ class RobokitMockState:
             "mock_map_001": self._default_smap("mock_map_001"),
         }
         self.obstacles: List[Dict[str, Any]] = []
+        self.vx = 0.0
+        self.vy = 0.0
+        self.w = 0.0
+        self.r_vx = 0.0
+        self.r_vy = 0.0
+        self.r_w = 0.0
+        self.is_stop = True
+        self.dispatch_mode = 0
+        self.connect_fleet = False
+        self.block_reason = 0
+        self.brake = False
+        self.emergency = False
+        self.soft_emc = False
+        self.driver_emc = False
+        self.manual_charge = False
+        self.loadmap_status = 1
+        self.fail_1100 = False
+        self.fail_1005 = False
+        self.batch_override: Dict[str, Any] = {}
+        self.locked_ip = "127.0.0.1"
+        self.locked_port = 52681
+        self.locked_type = 0
+        self.stations["LM6"] = (6.0, 0.0, 0.0)
+        self.stations["LM7"] = (7.0, 0.0, 0.0)
 
     def _default_smap(self, name: str) -> Dict[str, Any]:
         return {
@@ -409,7 +440,130 @@ class RobokitMockState:
                 self._reloc_stage_ring = [int(s) for s in stages]
                 self._reloc_stage_idx = 0
                 report["inject_reloc_stages"] = self._reloc_stage_ring
+            if "fail_1100" in payload:
+                self.fail_1100 = bool(payload["fail_1100"])
+                report["fail_1100"] = self.fail_1100
+            if "fail_1005" in payload:
+                self.fail_1005 = bool(payload["fail_1005"])
+                report["fail_1005"] = self.fail_1005
+            ov = payload.get("batch_override")
+            if isinstance(ov, dict):
+                self.batch_override.update(ov)
+                report["batch_override"] = dict(self.batch_override)
+            for key in (
+                "dispatch_mode",
+                "connect_fleet",
+                "block_reason",
+                "brake",
+                "emergency",
+                "soft_emc",
+                "driver_emc",
+                "manual_charge",
+                "r_vx",
+                "vx",
+                "is_stop",
+                "loadmap_status",
+            ):
+                if key in payload:
+                    setattr(self, key, payload[key])
+                    report[key] = payload[key]
         return report
+
+    def current_lock_obj(self) -> Dict[str, Any]:
+        locked = bool(self.locked_by)
+        return {
+            "locked": locked,
+            "ip": self.locked_ip if locked else "",
+            "port": self.locked_port if locked else 0,
+            "type": self.locked_type if locked else 0,
+            "nick_name": self.locked_by,
+            "time_t": int(time.time()) if locked else 0,
+            "desc": "",
+        }
+
+    def batch_status(self) -> Dict[str, Any]:
+        if self.fail_1100:
+            return {"ret_code": 40004, "err_msg": "mock 1100 failed"}
+        res = {
+            "ret_code": 0,
+            "dispatch_mode": int(self.dispatch_mode),
+            "connectFleet": bool(self.connect_fleet),
+            "current_lock": self.current_lock_obj(),
+            "vx": float(self.vx),
+            "vy": float(self.vy),
+            "w": float(self.w),
+            "r_vx": float(self.r_vx),
+            "r_vy": float(self.r_vy),
+            "r_w": float(self.r_w),
+            "is_stop": bool(self.is_stop),
+            "blocked": bool(self.block_reason),
+            "block_reason": int(self.block_reason),
+            "brake": bool(self.brake),
+            "emergency": bool(self.emergency),
+            "soft_emc": bool(self.soft_emc),
+            "driver_emc": bool(self.driver_emc),
+            "manual_charge": bool(self.manual_charge),
+            "task_status": self.task_status,
+            "task_type": self.task_type,
+            "target_id": self.target_id,
+            "finished_path": list(self.finished_path),
+            "unfinished_path": list(self.unfinished_path),
+            "reloc_status": self.reloc_status,
+            "loadmap_status": int(self.loadmap_status),
+            "current_map": self.current_map,
+            "vehicle_id": self.vehicle_id,
+            "move_status_info": "",
+            "confidence": self.confidence,
+            "current_station": self.current_station,
+            "motor_info": [],
+            "errors": [],
+            "fatals": [],
+            "warnings": [],
+        }
+        res.update(self.batch_override)
+        return res
+
+    def speed(self) -> Dict[str, Any]:
+        if self.fail_1005:
+            return {"ret_code": 40004, "err_msg": "mock 1005 failed"}
+        return {
+            "ret_code": 0,
+            "vx": float(self.vx),
+            "vy": float(self.vy),
+            "w": float(self.w),
+            "r_vx": float(self.r_vx),
+            "r_vy": float(self.r_vy),
+            "r_w": float(self.r_w),
+            "is_stop": bool(self.is_stop),
+        }
+
+    def block(self) -> Dict[str, Any]:
+        return {
+            "ret_code": 0,
+            "blocked": bool(self.block_reason),
+            "block_reason": int(self.block_reason),
+        }
+
+    def emergency_q(self) -> Dict[str, Any]:
+        return {
+            "ret_code": 0,
+            "emergency": bool(self.emergency),
+            "soft_emc": bool(self.soft_emc),
+            "driver_emc": bool(self.driver_emc),
+        }
+
+    def control_owner(self) -> Dict[str, Any]:
+        out = {"ret_code": 0}
+        out.update(self.current_lock_obj())
+        return out
+
+    def path_info(self, source_id: str, target_id: str) -> Dict[str, Any]:
+        smap = self.maps.get(self.current_map) or {}
+        ids = {str(pt.get("instanceName") or "") for pt in (smap.get("advancedPointList") or [])}
+        ids.update(self.stations.keys())
+        if source_id and target_id and source_id in ids and target_id in ids:
+            return {"ret_code": 0, "path": [source_id, target_id]}
+        return {"ret_code": 0, "path": []}
 
 
 def _recv_exact(sock: socket.socket, n: int) -> bytes:
@@ -443,6 +597,12 @@ def _handle_client(conn: socket.socket, state: RobokitMockState) -> None:
             with state.lock:
                 if api_type == API_LOC:
                     resp = state.loc()
+                elif api_type == API_SPEED:
+                    resp = state.speed()
+                elif api_type == API_BLOCK:
+                    resp = state.block()
+                elif api_type == API_EMERGENCY:
+                    resp = state.emergency_q()
                 elif api_type == API_BATTERY:
                     resp = state.battery()
                 elif api_type == API_LASER:
@@ -451,6 +611,17 @@ def _handle_client(conn: socket.socket, state: RobokitMockState) -> None:
                     resp = state.task(simple=bool(payload.get("simple")))
                 elif api_type == API_RELOC_STATUS:
                     resp = state.reloc_status_q()
+                elif api_type == API_MAP_LOAD:
+                    resp = {"ret_code": 0, "loadmap_status": int(state.loadmap_status)}
+                elif api_type == API_CONTROL_OWNER:
+                    resp = state.control_owner()
+                elif api_type == API_BATCH:
+                    resp = state.batch_status()
+                elif api_type == API_PATH_QUERY:
+                    resp = state.path_info(
+                        str(payload.get("source_id") or ""),
+                        str(payload.get("target_id") or payload.get("id") or ""),
+                    )
                 elif api_type == API_RELOC:
                     resp = state.do_relocate(
                         x=payload.get("x"),

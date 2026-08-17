@@ -202,3 +202,21 @@ class StackSupervisor:
             "wrist_apriltag": _pgrep("apriltag_node"),
             "last": dict(self._status),
         }
+
+    def restart_component(self, name: str) -> Dict[str, Any]:
+        name = str(name or "").strip()
+        comp = next((c for c in self._components() if c["name"] == name), None)
+        if not comp:
+            return {"success": False, "message": f"未知 stack 组件: {name}"}
+        pattern = str(comp["pgrep"])
+        self._log(f"stack_supervisor: restart {name} (kill {pattern})")
+        _kill_pattern(pattern)
+        time.sleep(1.0)
+        result = self._start_one(comp)
+        ok = bool(result.get("ok"))
+        self._last_check = 0.0
+        return {
+            "success": ok,
+            "message": f"{comp.get('label', name)} 已重启" if ok else f"重启 {name} 失败",
+            "detail": result,
+        }

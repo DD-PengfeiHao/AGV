@@ -31,6 +31,10 @@ API_LASER = 1009
 API_EMERGENCY = 1012
 API_TASK_STATUS = 1020
 API_RELOC_STATUS = 1021
+API_MAP_LOAD_STATUS = 1022  # query map load: 0=fail 1=ok 2=loading
+API_CONTROL_OWNER = 1060  # robot_status_current_lock_req
+API_BATCH_STATUS = 1100  # robot_status_all1_req
+API_PATH_QUERY = 1303  # query path between two stations
 API_RELOC = 2002
 API_CONFIRM_LOC = 2003
 API_CANCEL_RELOC = 2004
@@ -221,12 +225,44 @@ class RobokitClient:
         return self.request(PORT_STATUS, API_LOC)
 
     def get_speed(self) -> Dict[str, Any]:
-        """Robokit 1005 — robot_status_speed_req (port 19204)."""
+        """Robokit 1005 — robot_status_speed_req (port 19204).
+
+        Documented fields: vx/vy/w (actual), r_vx/r_vy/r_w (nav commanded),
+        is_stop, plus steer/spin variants. ``r_vx`` is the P0 split:
+        0 → upper layer not commanding motion; >0 with vx=0 → chassis not executing.
+        """
         return self.request(PORT_STATUS, API_SPEED)
 
     def get_block_status(self) -> Dict[str, Any]:
         """Robokit 1006 — robot_status_block_req (port 19204)."""
         return self.request(PORT_STATUS, API_BLOCK)
+
+    def get_batch_status(self) -> Dict[str, Any]:
+        """Robokit 1100 — robot_status_all1_req (port 19204, READ-ONLY)."""
+        return self.request(PORT_STATUS, API_BATCH_STATUS)
+
+    def get_map_load_status(self) -> Dict[str, Any]:
+        """Robokit 1022 — map load status (port 19204, READ-ONLY).
+
+        ``loadmap_status``: 0=fail, 1=success, 2=loading.
+        """
+        return self.request(PORT_STATUS, API_MAP_LOAD_STATUS)
+
+    def get_control_owner(self) -> Dict[str, Any]:
+        """Robokit 1060 — current lock owner (port 19204, READ-ONLY).
+
+        Fields: locked, ip, port, type, nick_name, time_t, desc.
+        Nested ``current_lock`` exists on 1100, not on this API.
+        """
+        return self.request(PORT_STATUS, API_CONTROL_OWNER)
+
+    def get_path_info(self, source_id: str, target_id: str) -> Dict[str, Any]:
+        """Robokit 1303 — path between two stations (port 19204, READ-ONLY)."""
+        return self.request(
+            PORT_STATUS,
+            API_PATH_QUERY,
+            {"source_id": source_id, "target_id": target_id, "id": target_id},
+        )
 
     def get_battery(self) -> Dict[str, Any]:
         """Robokit 1007 — robot_status_battery_req (port 19204)."""

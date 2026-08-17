@@ -66,19 +66,24 @@ class LeoFaceBridge:
             self._cfg.leo_face_capture_service or f"/face/{cam}/capture_and_recognize"
         )
 
+        from rclpy.callback_groups import ReentrantCallbackGroup
         from std_msgs.msg import String
         from std_srvs.srv import SetBool, Trigger
 
-        cg = getattr(node, "_cg", None)
+        sub_cg = getattr(node, "_cg", None)
+        cli_cg = ReentrantCallbackGroup()
         # Subscribe before SetBool(true) so startup results are not missed (§8.1).
         node.create_subscription(
-            String, self._result_topic, self._on_result, _RESULT_QOS, callback_group=cg
+            String, self._result_topic, self._on_result, _RESULT_QOS, callback_group=sub_cg
         )
+        # Exact service Leo uses:
+        #   ros2 service call /face/cam_front/continuous_recognition std_srvs/srv/SetBool '{data: true}'
+        self._continuous_svc = "/face/cam_front/continuous_recognition"
         self._continuous_client = node.create_client(
-            SetBool, self._continuous_svc, callback_group=cg
+            SetBool, self._continuous_svc, callback_group=cli_cg
         )
         self._capture_client = node.create_client(
-            Trigger, self._capture_svc, callback_group=cg
+            Trigger, self._capture_svc, callback_group=cli_cg
         )
 
     def _on_result(self, msg) -> None:
@@ -227,39 +232,101 @@ class LeoFaceBridge:
         }
 
     def set_continuous(self, enabled: bool, timeout_sec: Optional[float] = None) -> Dict[str, Any]:
+        """Match Leo's working CLI: SetBool {data: true|false} on /face/cam_front/continuous_recognition."""
         from std_srvs.srv import SetBool
 
         if timeout_sec is None:
-            timeout_sec = 240.0 if enabled else 10.0
-        if not self._continuous_client.wait_for_service(timeout_sec=5.0):
-            return {
-                "success": False,
-                "message": f"service unavailable: {self._continuous_svc}",
-            }
+            timeout_sec = 8.0
+        yaml_body = "{data: true}" if enabled else "{data: false}"
+        if not self._continuous_client.wait_for_service(timeout_sec=3.0):
+            return self._set_continuous_via_cli(enabled, timeout_sec, yaml_body)
         req = SetBool.Request()
         req.data = bool(enabled)
         future = self._continuous_client.call_async(req)
         if not self._wait_future(future, timeout_sec):
-            return {"success": False, "message": "continuous_recognition timeout"}
+            return self._set_continuous_via_cli(enabled, timeout_sec, yaml_body)
         try:
             res = future.result()
         except Exception as exc:  # noqa: BLE001
-            return {"success": False, "message": str(exc)}
-        payload = _parse_json(str(res.message or ""))
+            return self._set_continuous_via_cli(enabled, timeout_sec, yaml_body, note=str(exc))
+        return self._set_continuous_result(enabled, bool(getattr(res, "success", False)), str(getattr(res, "message", "") or ""))
+
+    def _set_continuous_via_cli(
+        self,
+        enabled: bool,
+        timeout_sec: float,
+        yaml_body: str,
+        note: str = "",
+    ) -> Dict[str, Any]:
+        """Same command Leo uses in the terminal."""
+        import os
+        import subprocess
+
+        env = os.environ.copy()
+        env["ROS_DOMAIN_ID"] = str(self._cfg.ros_domain_id)
+        cmd = [
+            "ros2",
+            "service",
+            "call",
+            "/face/cam_front/continuous_recognition",
+            "std_srvs/srv/SetBool",
+            yaml_body,
+        ]
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=max(5.0, float(timeout_sec)),
+                env=env,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "success": False,
+                "message": f"cli failed: {exc}" + (f" ({note})" if note else ""),
+                "enabled": enabled,
+                "command": " ".join(cmd),
+            }
+        text = (proc.stdout or "") + "\n" + (proc.stderr or "")
+        success = "success: True" in text or "success: true" in text
+        msg = ""
+        for line in text.splitlines():
+            s = line.strip()
+            if s.startswith("message:"):
+                msg = s.split(":", 1)[1].strip().strip("'").strip('"')
+                break
+        if not success and proc.returncode != 0:
+            return {
+                "success": False,
+                "message": (msg or text.strip() or f"exit {proc.returncode}") + (f" ({note})" if note else ""),
+                "enabled": enabled,
+                "command": " ".join(cmd),
+            }
+        out = self._set_continuous_result(enabled, True if success else proc.returncode == 0, msg or text.strip())
+        out["command"] = " ".join(cmd)
+        out["via"] = "ros2_cli"
+        return out
+
+    def _set_continuous_result(self, enabled: bool, svc_ok: bool, message: str) -> Dict[str, Any]:
+        payload = _parse_json(message)
         status = str(payload.get("status") or "")
-        json_ok = payload.get("success", res.success) is not False
-        ok = bool(res.success) and json_ok
-        running = bool(enabled) and ok
-        if not enabled and ok:
+        json_ok = payload.get("success", svc_ok) is not False
+        ok = bool(svc_ok) and json_ok
+        if enabled:
+            running = ok and status in ("", "RUNNING", "ALREADY_RUNNING")
+            if ok and not status:
+                running = True
+        else:
             running = False
         with self._lock:
             self._continuous = running
         return {
             "success": ok,
-            "message": str(res.message or status or ("OK" if ok else "FAILED")),
+            "message": message or status or ("OK" if ok else "FAILED"),
             "enabled": enabled,
-            "status": status,
+            "status": status or ("RUNNING" if running else ("STOPPED" if ok and not enabled else "")),
             "payload": payload,
+            "command": f"ros2 service call /face/cam_front/continuous_recognition std_srvs/srv/SetBool '{{data: {'true' if enabled else 'false'}}}'",
         }
 
     def trigger_face(self) -> Dict[str, Any]:

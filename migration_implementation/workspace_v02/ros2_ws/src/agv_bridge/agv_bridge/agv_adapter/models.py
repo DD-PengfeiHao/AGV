@@ -112,6 +112,30 @@ class RobotState:
     connected: bool = False
     host: str = ""
     mode: str = ""
+    # Diagnostic fields: None = unknown (never coerce API failure to 0/False).
+    r_vx: Optional[float] = None
+    r_vy: Optional[float] = None
+    r_w: Optional[float] = None
+    is_stop: Optional[bool] = None
+    dispatch_mode: Optional[int] = None
+    connect_fleet: Optional[bool] = None
+    current_lock: Optional[Dict[str, Any]] = None
+    block_reason: Optional[int] = None
+    brake: Optional[bool] = None
+    driver_emc: Optional[bool] = None
+    manual_charge: Optional[bool] = None
+    motor_info: Optional[List[Dict[str, Any]]] = None
+    errors: Optional[List[Any]] = None
+    fatals: Optional[List[Any]] = None
+    warnings: Optional[List[Any]] = None
+    current_map: Optional[str] = None
+    vehicle_id: Optional[str] = None
+    move_status_info: Optional[str] = None
+    manual_block: Optional[bool] = None
+    tracking_status: Optional[int] = None
+    diag_source: Optional[str] = None
+    reloc_status: Optional[int] = None
+    loadmap_status: Optional[int] = None
 
     def agv_state_dict(self, prev: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Merge into dashboard ``agv`` dict shape."""
@@ -127,7 +151,6 @@ class RobotState:
             "current_station": pose.current_station,
             "last_station": pose.last_station or str(prev.get("last_station", "") or ""),
             "mode": "real" if self.mode in ("demo", "mock") else "sim",
-            "vehicle_id": pose.vehicle_id or str(prev.get("vehicle_id") or "REAL-AGV"),
             "task_status": nav.task_status if self.navigation else int(prev.get("task_status", 0) or 0),
             "task_type": nav.task_type if self.navigation else int(prev.get("task_type", 0) or 0),
             "target_id": nav.target_id if self.navigation else str(prev.get("target_id", "") or ""),
@@ -144,6 +167,30 @@ class RobotState:
             "w": float(self.w),
             "speed": abs(float(self.vx)),
             "yaw_deg": float(pose.angle) * 180.0 / 3.141592653589793,
+            "r_vx": self.r_vx,
+            "r_vy": self.r_vy,
+            "r_w": self.r_w,
+            "is_stop": self.is_stop,
+            "dispatch_mode": self.dispatch_mode,
+            "connect_fleet": self.connect_fleet,
+            "current_lock": self.current_lock,
+            "block_reason": self.block_reason,
+            "brake": self.brake,
+            "driver_emc": self.driver_emc,
+            "manual_charge": self.manual_charge,
+            "motor_info": self.motor_info,
+            "errors": self.errors,
+            "fatals": self.fatals,
+            "warnings": self.warnings,
+            "current_map": self.current_map,
+            "vehicle_id": pose.vehicle_id or self.vehicle_id or str(prev.get("vehicle_id") or "REAL-AGV"),
+            "move_status_info": self.move_status_info,
+            "manualBlock": self.manual_block,
+            "manual_block": self.manual_block,
+            "tracking_status": self.tracking_status,
+            "diag_source": self.diag_source,
+            "reloc_status": self.reloc_status,
+            "loadmap_status": self.loadmap_status,
         }
 
     def laser_state_dict(self) -> Dict[str, Any]:
