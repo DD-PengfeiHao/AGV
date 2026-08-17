@@ -76,7 +76,7 @@ except Exception:  # noqa: BLE001
     RobokitError = Exception  # type: ignore
 
 
-VERSION = "0.52.0"
+VERSION = "0.52.1"
 WEB_FACE_API = 1
 
 FATAL_CODE_MAP: Dict[int, str] = {
@@ -478,6 +478,9 @@ class DashboardNode(Node):
         self._wrist_snap_lock = threading.Lock()
         self._wrist_snap_cached: tuple = (0.0, b"")
         self._vision_warmup_done = False
+        self._init_complete = False
+        # Bind HTTP before slow init (smap, vision timers, ament index) so Web stays up.
+        self._start_http_servers()
         self._stack_supervisor = StackSupervisor(
             self._device_cfg,
             logger=lambda msg: self.get_logger().info(str(msg)),
@@ -491,7 +494,12 @@ class DashboardNode(Node):
         self._map_cloud: List[Dict[str, float]] = []
         self._smap_raw: Dict[str, Any] = {}
         self._smap_path: Optional[Path] = None
-        self._load_smap(str(self.get_parameter("smap_file").value) or DEFAULT_SMAP)
+        smap_arg = str(self.get_parameter("smap_file").value) or DEFAULT_SMAP
+        threading.Thread(
+            target=lambda: self._load_smap(smap_arg),
+            daemon=True,
+            name="boot-load-smap",
+        ).start()
         self._push_event("system", f"dashboard v{VERSION} demo:19999 debug:1999 (dji_gui-inspired)")
         self._slog.log(
             "boot",
@@ -561,11 +569,24 @@ class DashboardNode(Node):
         self.create_timer(1.0, self._vision_warmup_tick, callback_group=self._cg)
         self.create_timer(30.0, self._stack_watchdog_tick, callback_group=self._cg)
         self.create_timer(2.0, self._vision_status_tick, callback_group=self._cg)
+        self._init_complete = True
 
-        share = Path(get_package_share_directory("delivery_web"))
-        www = share / "www"
-        if not (www / "index.html").is_file():
-            www = Path(__file__).resolve().parents[1] / "www"
+    def _resolve_www_paths(self) -> None:
+        candidates = [
+            Path("/opt/delivery_ws/install/delivery_web/share/delivery_web/www"),
+            Path(__file__).resolve().parents[1] / "www",
+        ]
+        www: Optional[Path] = None
+        for cand in candidates:
+            if (cand / "index.html").is_file():
+                www = cand
+                break
+        if www is None:
+            try:
+                share = Path(get_package_share_directory("delivery_web"))
+                www = share / "www"
+            except Exception:  # noqa: BLE001
+                www = Path(__file__).resolve().parents[1] / "www"
         self._www_demo = www
         self._www_debug = www / "debug"
         if not (self._www_debug / "index.html").is_file():
@@ -573,11 +594,14 @@ class DashboardNode(Node):
             if (alt / "index.html").is_file():
                 self._www_debug = alt
 
+    def _start_http_servers(self) -> None:
+        if getattr(self, "_httpd_demo", None) is not None:
+            return
+        self._resolve_www_paths()
         host = self.get_parameter("http_host").get_parameter_value().string_value
         demo_port = int(self.get_parameter("demo_port").value)
         debug_port = int(self.get_parameter("debug_port").value)
         self._state["ports"] = {"demo": demo_port, "debug": debug_port}
-
         self._httpd_demo = ThreadingHTTPServer(
             (host, demo_port), self._make_handler(mode="demo")
         )
@@ -645,18 +669,7 @@ class DashboardNode(Node):
 
     def _vision_snapshot(self) -> Dict[str, Any]:
         cache = getattr(self, "_vision_cache", None) or {}
-        if cache:
-            return dict(cache)
-        try:
-            v = self._get_vision()
-            return {
-                "floor_qr_scanner": v.floor_qr_status(),
-                "floor_qr_localization": v.floor_qr_localization(),
-                "wrist_camera": v.wrist_status(),
-                "leo_face": v.leo_status(),
-            }
-        except Exception:  # noqa: BLE001
-            return {}
+        return dict(cache) if cache else {}
 
     def _alert_item(
         self,
@@ -3152,19 +3165,23 @@ class DashboardNode(Node):
                     self._json(200, {"env": (node.snapshot().get("env") or {}), "success": True})
                     return
                 if path == "/api/version":
-                    st = node.snapshot()
+                    stack = {}
+                    try:
+                        stack = node._stack_supervisor.status()
+                    except Exception:  # noqa: BLE001
+                        pass
                     self._json(
                         200,
                         {
                             "version": VERSION,
                             "project": "delivery-ros2",
-                            "stack": "gazebo-v02",
+                            "stack": stack,
                             "freeze": "v0.50-frozen",
                             "ports": node._state.get("ports"),
                             "ui": mode,
                             "web_face_api": WEB_FACE_API,
-                            "env": st.get("env"),
-                            "stack": node._stack_supervisor.status(),
+                            "env": node._public_env(),
+                            "initializing": not getattr(node, "_init_complete", False),
                         },
                     )
                     return
