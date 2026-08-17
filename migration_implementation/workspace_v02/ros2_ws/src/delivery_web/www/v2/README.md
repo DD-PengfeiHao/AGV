@@ -1,23 +1,36 @@
-# Real Web V2 — Phase 2 Scaffold
+# Real Web V2 — Phase 2 (PoC)
 
-**Status**: Started in V0.52.2 (GitHub only). Not wired into `index.html` yet.
+## Layout
 
-## Modules
+```
+www/v2/
+├── app/bootstrap.js          # V2 entry (login → start, logout → destroy)
+├── store/
+│   ├── state_store.js        # Single /api/state poll
+│   ├── telemetry_store.js    # Ring buffer metrics
+│   └── event_store.js        # Timeline events
+├── registry/
+│   ├── component_registry.js
+│   └── group_registry.js
+├── scene/
+│   ├── scene_state.js
+│   ├── scene_renderer.js     # Canvas 2D Overview
+│   ├── view_controller.js
+│   └── camera_controller.js
+├── components/
+│   ├── agv/observe.js        # PoC AGV group
+│   └── debug/metrics.js      # admin debug cards
+└── styles/
+    ├── layout.css
+    └── components.css
+```
 
-| File | Role |
-|------|------|
-| `state_store.js` | Single `/api/state` poll + pub/sub |
-| `component_registry.js` | Component mount/update/unmount lifecycle |
-| `group_registry.js` | Collapsible groups — replaces widget column for new UI |
+## Mode
 
-## Hard Rule (from architecture audit)
+`window.APP_MODE = 'V2'` in index.html — disables legacy `pollState()`, uses StateStore @ 500ms.
 
-> **Do NOT add new components to `widgets.js` / `#widgetLayer`.**  
-> All new Real Web V2 surfaces register via `ComponentRegistry` and mount inside `GroupRegistry` groups.
+Set to `'LEGACY'` to roll back without removing V2 code.
 
-## Next Steps (Phase 2 continuation)
+## Rule
 
-1. Add `#v2Layout` region in `index.html` (alongside legacy map, not replacing yet)
-2. Load `v2/*.js` after `auth.js`
-3. Migrate first group (e.g. OBSERVE status chips) as proof-of-concept
-4. Connect `stateStore.start()` after login
+**Do NOT add components to `widgets.js` or `#widgetLayer`.**

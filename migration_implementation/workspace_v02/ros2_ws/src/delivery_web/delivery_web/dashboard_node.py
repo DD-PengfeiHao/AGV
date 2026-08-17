@@ -78,7 +78,7 @@ except Exception:  # noqa: BLE001
 
 from delivery_web.web_auth import WebAuth
 
-VERSION = "0.52.2"
+VERSION = "0.52.3"
 WEB_FACE_API = 1
 
 FATAL_CODE_MAP: Dict[int, str] = {

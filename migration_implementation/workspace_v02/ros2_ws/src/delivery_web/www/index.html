@@ -7,10 +7,13 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="v2/styles/layout.css"/>
+<link rel="stylesheet" href="v2/styles/components.css"/>
 <style>
 :root{
   --font-primary:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',Roboto,sans-serif;
   --font-mono:'JetBrains Mono','Fira Code','Cascadia Code',Consolas,monospace;
+  --mono-font:var(--font-mono);
   --bg:#FFFFFF; --surface:#F7F8FA; --surface2:#FFFFFF; --line:#E5E7EB;
   --text:#2D2D2D; --muted:#6B7280; --ok:#10B981; --warn:#F59E0B; --bad:#EF4444; --info:#3B82F6;
   --accent:#E5364A; --accent2:#C42B3D; --accent-light:#FF6B7A; --agv:#E5364A;
@@ -449,6 +452,21 @@ select,input[type=text],input[type=number]{
 <div id="alertContainer" class="alert-container"></div>
 
 <main>
+  <section id="v2Main" class="v2-main">
+    <section class="v2-scene-section">
+      <canvas id="v2SceneCanvas" aria-label="AGV Overview Scene"></canvas>
+      <div class="v2-view-hud" id="v2ViewHud"></div>
+      <div class="v2-scene-tools">
+        <button type="button" id="v2BtnFollow" class="active" title="跟随 AGV">跟随</button>
+        <button type="button" id="v2BtnHome" title="归位车辆">归位</button>
+        <button type="button" id="v2BtnZoomIn" title="放大">+</button>
+        <button type="button" id="v2BtnZoomOut" title="缩小">−</button>
+      </div>
+    </section>
+    <div id="v2Layout"></div>
+  </section>
+
+  <div id="legacyMain">
   <section class="map-section">
     <canvas id="map"></canvas>
     <div class="map-overlay" id="mapOverlay">STATIC MAP · NO LIVE LIDAR</div>
@@ -601,6 +619,7 @@ select,input[type=text],input[type=number]{
     </div>
   </details>
   </div><!-- /widgetSource -->
+  </div><!-- /legacyMain -->
 </main>
 
 <div id="toastHost"></div>
@@ -710,6 +729,19 @@ select,input[type=text],input[type=number]{
 </div>
 
 <script src="auth.js"></script>
+<script>window.APP_MODE = 'V2';</script>
+<script src="v2/store/event_store.js"></script>
+<script src="v2/store/telemetry_store.js"></script>
+<script src="v2/store/state_store.js"></script>
+<script src="v2/registry/component_registry.js"></script>
+<script src="v2/registry/group_registry.js"></script>
+<script src="v2/scene/scene_state.js"></script>
+<script src="v2/scene/camera_controller.js"></script>
+<script src="v2/scene/view_controller.js"></script>
+<script src="v2/scene/scene_renderer.js"></script>
+<script src="v2/components/agv/observe.js"></script>
+<script src="v2/components/debug/metrics.js"></script>
+<script src="v2/app/bootstrap.js"></script>
 <script src="widgets.js"></script>
 <script src="alert_queue.js"></script>
 <script src="arm_widget.js"></script>
@@ -1866,7 +1898,7 @@ document.getElementById('ctlLock')?.addEventListener('change', async (e) => {
 });
 
 setInterval(pollHeartbeat, HEARTBEAT_MS);
-setInterval(() => { if (Auth.isLoggedIn()) pollState(); }, STATE_POLL_MS);
+setInterval(() => { if (Auth.isLoggedIn() && window.APP_MODE !== 'V2') pollState(); }, STATE_POLL_MS);
 setInterval(() => { if (Auth.isLoggedIn()) pollWristLive(); }, 400);
 setInterval(() => { if (Auth.isLoggedIn()) pollRoute(); }, 2000);
 bindVisionActions();
@@ -1876,6 +1908,11 @@ async function bootApp() {
   Auth.applyUi();
   if (!Auth.isLoggedIn()) return;
   if (!Auth.isAdmin()) delete window.WIDGET_REGISTRY.verbose_log;
+  if (window.APP_MODE === 'V2' && window.V2Bootstrap) {
+    V2Bootstrap.start();
+    pollHeartbeat();
+    return;
+  }
   initWidgets();
   pollHeartbeat();
   pollState();
@@ -1890,8 +1927,13 @@ $('#btnLoginSubmit')?.addEventListener('click', async () => {
     await Auth.login($('#loginUsername')?.value, $('#loginPassword')?.value);
     Auth.applyUi();
     if (!Auth.isAdmin()) delete window.WIDGET_REGISTRY.verbose_log;
-    initWidgets();
-    pollState();
+    if (window.APP_MODE === 'V2' && window.V2Bootstrap) {
+      V2Bootstrap.start();
+      pollHeartbeat();
+    } else {
+      initWidgets();
+      pollState();
+    }
     errEl.textContent = '';
   } catch (e) {
     errEl.textContent = e.message || '登录失败';
@@ -1901,6 +1943,7 @@ $('#loginPassword')?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') $('#btnLoginSubmit')?.click();
 });
 $('#btnAuthLogout')?.addEventListener('click', async () => {
+  if (window.V2Bootstrap) V2Bootstrap.destroy();
   await Auth.logout();
   Auth.applyUi();
   location.reload();
