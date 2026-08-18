@@ -23,7 +23,7 @@ Copy-Item "$Src\www\alert_queue.js" "$Out\www\"
 Copy-Item "$Src\www\widgets.js" "$Out\www\"
 Copy-Item "$Src\www\v2\*" "$Out\www\v2\" -Recurse
 Copy-Item "$Src\www\debug\index.html" "$Out\www\debug\"
-Copy-Item "$Root\..\V0.52.4\blackbox_deploy_nuc.sh" "$Out\deploy_nuc.sh"
+Copy-Item "$Root\deploy_nuc.sh" "$Out\deploy_nuc.sh"
 Copy-Item "$Root\..\V0.52.4\blackbox_verify_nuc.sh" "$Out\verify_nuc.sh"
 
 Write-Host "Staged V0.52.5 to $Out"
