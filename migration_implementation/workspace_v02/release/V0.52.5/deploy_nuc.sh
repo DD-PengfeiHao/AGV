@@ -15,6 +15,12 @@ ok() { echo "DEPLOY_OK: $*"; }
 [ -f "$TMP/delivery_web/dashboard_node.py" ] || fail "missing dashboard_node.py"
 [ -f "$TMP/www/index.html" ] || fail "missing www/index.html"
 
+sync_www_v2() {
+  local dst="$1"
+  docker exec "$C" bash -lc "rm -rf '$dst' && mkdir -p '$dst'"
+  docker cp "$TMP/www/v2/." "$C:$dst/"
+}
+
 echo "========== COPY SRC =========="
 docker cp "$TMP/delivery_web/dashboard_node.py" "$C:$SRC_DW/delivery_web/dashboard_node.py"
 docker cp "$TMP/delivery_web/web_auth.py" "$C:$SRC_DW/delivery_web/web_auth.py"
@@ -24,7 +30,7 @@ docker cp "$TMP/www/index.html" "$C:$SRC_DW/www/index.html"
 docker cp "$TMP/www/auth.js" "$C:$SRC_DW/www/auth.js"
 docker cp "$TMP/www/alert_queue.js" "$C:$SRC_DW/www/alert_queue.js"
 docker cp "$TMP/www/widgets.js" "$C:$SRC_DW/www/widgets.js"
-[ -d "$TMP/www/v2" ] && docker cp "$TMP/www/v2" "$C:$SRC_DW/www/v2"
+[ -d "$TMP/www/v2" ] && sync_www_v2 "$SRC_DW/www/v2"
 [ -f "$TMP/www/debug/index.html" ] && docker cp "$TMP/www/debug/index.html" "$C:$SRC_DW/www/debug/index.html"
 
 echo "========== COPY INSTALL =========="
@@ -36,8 +42,11 @@ docker cp "$TMP/www/index.html" "$C:$WWW/index.html"
 docker cp "$TMP/www/auth.js" "$C:$WWW/auth.js"
 docker cp "$TMP/www/alert_queue.js" "$C:$WWW/alert_queue.js"
 docker cp "$TMP/www/widgets.js" "$C:$WWW/widgets.js"
-[ -d "$TMP/www/v2" ] && docker cp "$TMP/www/v2" "$C:$WWW/v2"
+[ -d "$TMP/www/v2" ] && sync_www_v2 "$WWW/v2"
 [ -f "$TMP/www/debug/index.html" ] && docker cp "$TMP/www/debug/index.html" "$C:$WWW/debug/index.html"
+
+docker exec "$C" bash -lc "test -f $WWW/v2/map/map_manager.js" || fail "www v2/map/map_manager.js missing (docker cp nest?)"
+docker exec "$C" bash -lc "test -f $WWW/v2/components/system/map_status.js" || fail "www v2/components/system/map_status.js missing"
 
 docker exec "$C" bash -lc "grep -m1 'VERSION = \"0.52.5\"' $PY_DW/dashboard_node.py" || fail "VERSION 0.52.5 not in install path"
 docker exec "$C" bash -lc "test -f $PY_DW/blackbox/manager.py" || fail "blackbox package missing"
