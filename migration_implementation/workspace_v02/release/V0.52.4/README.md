@@ -20,6 +20,12 @@
 ```bash
 # On dev machine: stage to NUC /tmp/v0524_deploy (see stage_v0524.ps1)
 ssh ubuntu@172.31.0.84 'bash /tmp/v0524_deploy/blackbox_deploy_nuc.sh'
+
+# Verify requires Web admin password (NUC may have changed from default ubuntu/ubuntu)
+# Option A: env var
+ssh ubuntu@172.31.0.84 'BB_PASS="your-web-password" bash /tmp/v0524_deploy/blackbox_verify_nuc.sh'
+# Option B: password file on NUC host (chmod 600)
+# echo -n 'your-web-password' > ~/Pengfei.Hao/.web_auth_pass && chmod 600 ~/Pengfei.Hao/.web_auth_pass
 ssh ubuntu@172.31.0.84 'bash /tmp/v0524_deploy/blackbox_verify_nuc.sh'
 ```
 

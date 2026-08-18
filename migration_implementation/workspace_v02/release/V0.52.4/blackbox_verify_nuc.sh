@@ -4,8 +4,14 @@ set -eu
 C="delivery_gazebo_soft"
 BASE="http://127.0.0.1:19999"
 USER="${BB_USER:-ubuntu}"
-PASS="${BB_PASS:-ubuntu}"
+PASS="${BB_PASS:-}"
+PASS_FILE="${BB_PASS_FILE:-/home/ubuntu/Pengfei.Hao/.web_auth_pass}"
 WARM_SEC="${BB_WARM_SEC:-25}"
+
+if [ -z "$PASS" ] && [ -f "$PASS_FILE" ]; then
+  PASS=$(tr -d '\r\n' < "$PASS_FILE")
+fi
+[ -n "$PASS" ] || fail "set BB_PASS or create $PASS_FILE with web admin password"
 
 fail() { echo "VERIFY_FAIL: $*"; exit 1; }
 ok() { echo "VERIFY_OK: $*"; }
