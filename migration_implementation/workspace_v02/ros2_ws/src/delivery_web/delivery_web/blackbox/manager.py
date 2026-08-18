@@ -16,6 +16,7 @@ from delivery_web.blackbox.schema import (
     BLACKBOX_VERSION,
     CAPTURE_POST_SEC,
     CAPTURE_PRE_SEC,
+    CAMERA_BUFFER_MAX_AGE_SEC,
     MAX_CAMERA_FRAMES_PER_CAM,
     MAX_EVENT_ENTRIES,
     MAX_LOG_ENTRIES,
@@ -65,7 +66,7 @@ class BlackBoxManager:
         self._event_buf = RingBuffer(PRE_BUFFER_RETENTION_SEC * 2, MAX_EVENT_ENTRIES)
         self._alert_buf = RingBuffer(PRE_BUFFER_RETENTION_SEC * 2, MAX_EVENT_ENTRIES)
         self._log_buf = RingBuffer(PRE_BUFFER_RETENTION_SEC * 2, MAX_LOG_ENTRIES)
-        self._camera_buf = CameraRingBuffer(PRE_BUFFER_RETENTION_SEC, MAX_CAMERA_FRAMES_PER_CAM)
+        self._camera_buf = CameraRingBuffer(CAMERA_BUFFER_MAX_AGE_SEC, MAX_CAMERA_FRAMES_PER_CAM)
         self._writer = DiskWriter(logger=self._log)
 
         try:
@@ -345,7 +346,8 @@ class BlackBoxManager:
                     "state": self._state_buf.health(),
                     "telemetry": self._telemetry_buf.health(),
                     "events": self._event_buf.health(),
-                    "camera": self._camera_buf.health(),
+                    "camera": self._camera_buf.health(retention_target_sec=CAPTURE_PRE_SEC),
+                    "camera_max_age_sec": CAMERA_BUFFER_MAX_AGE_SEC,
                 },
                 "last_record": self._last_record,
                 "last_error": self._last_error,

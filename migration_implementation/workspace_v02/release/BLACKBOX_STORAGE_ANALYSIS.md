@@ -18,7 +18,9 @@
 | Events/logs | ~5000 × 500B ≈ 2.5 MB |
 | Camera (4 cams × 90 × 150KB) | **~54 MB** (dominant) |
 
-**Total RAM ceiling ~60–80 MB** with 4 cameras at ~150KB/frame.
+**V0.52.4 fix**: `MAX_CAMERA_FRAMES_PER_CAM = 240` (8 FPS × 30s). Time eviction (`CAMERA_BUFFER_MAX_AGE_SEC=30`) is authoritative; count cap is RAM safety only.
+
+**Total RAM ceiling ~80–120 MB** with 4 cameras at ~150KB/frame.
 
 Mitigation: `MAX_CAMERA_FRAMES_PER_CAM=90`, JPEG only (no raw), time eviction.
 
