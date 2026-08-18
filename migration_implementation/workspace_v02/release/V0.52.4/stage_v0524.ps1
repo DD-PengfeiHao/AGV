@@ -24,7 +24,7 @@ Copy-Item "$Root\blackbox_deploy_nuc.sh" "$Out\"
 Copy-Item "$Root\blackbox_verify_nuc.sh" "$Out\"
 
 Write-Host "Staged to $Out"
-Write-Host "Uploading to $Nuc:$Remote ..."
+Write-Host "Uploading to ${Nuc}:${Remote} ..."
 ssh $Nuc "rm -rf $Remote && mkdir -p $Remote"
 scp -r "$Out\*" "${Nuc}:${Remote}/"
 Write-Host "Run on NUC:"

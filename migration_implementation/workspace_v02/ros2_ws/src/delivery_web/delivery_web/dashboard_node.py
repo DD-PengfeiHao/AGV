@@ -3098,6 +3098,46 @@ class DashboardNode(Node):
                 if path.startswith("/api/auth/"):
                     self._json(404, {"error": "not found"})
                     return
+                # Public lightweight endpoints — before auth guard (avoid snapshot deadlock)
+                if path == "/api/version":
+                    stack = {}
+                    try:
+                        stack = node._stack_supervisor.status()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    self._json(
+                        200,
+                        {
+                            "version": VERSION,
+                            "project": "delivery-ros2",
+                            "stack": stack,
+                            "freeze": "v0.52.4-blackbox",
+                            "ports": node._state.get("ports"),
+                            "ui": mode,
+                            "web_face_api": WEB_FACE_API,
+                            "env": node._public_env(),
+                            "initializing": not getattr(node, "_init_complete", False),
+                        },
+                    )
+                    return
+                if path == "/api/health":
+                    self._json(
+                        200,
+                        {
+                            "ok": True,
+                            "version": VERSION,
+                            "listen_demo": "0.0.0.0:19999",
+                            "listen_debug": "0.0.0.0:1999",
+                            "uptime_sec": time.time() - node._t0,
+                            "ui": mode,
+                            "web_face_api": WEB_FACE_API,
+                            "blackbox": getattr(node, "_blackbox", None) is not None,
+                        },
+                    )
+                    return
+                if path == "/api/heartbeat":
+                    self._json(200, node.heartbeat())
+                    return
                 if path.startswith("/api/") and not self._guard_api(path):
                     return
                 if mode == "debug" and path.startswith("/api/"):
@@ -3252,9 +3292,6 @@ class DashboardNode(Node):
                     if cam.is_file():
                         self._send(200, cam.read_bytes(), "text/html; charset=utf-8")
                         return
-                if path == "/api/heartbeat":
-                    self._json(200, node.heartbeat())
-                    return
                 if path == "/api/state":
                     t0 = time.time()
                     data = node.snapshot()
@@ -3326,51 +3363,6 @@ class DashboardNode(Node):
                     return
                 if path == "/api/env":
                     self._json(200, {"env": (node.snapshot().get("env") or {}), "success": True})
-                    return
-                if path == "/api/version":
-                    stack = {}
-                    try:
-                        stack = node._stack_supervisor.status()
-                    except Exception:  # noqa: BLE001
-                        pass
-                    self._json(
-                        200,
-                        {
-                            "version": VERSION,
-                            "project": "delivery-ros2",
-                            "stack": stack,
-                            "freeze": "v0.50-frozen",
-                            "ports": node._state.get("ports"),
-                            "ui": mode,
-                            "web_face_api": WEB_FACE_API,
-                            "env": node._public_env(),
-                            "initializing": not getattr(node, "_init_complete", False),
-                        },
-                    )
-                    return
-                if path == "/api/health":
-                    st = node.snapshot()
-                    self._json(
-                        200,
-                        {
-                            "ok": True,
-                            "version": VERSION,
-                            "listen_demo": "0.0.0.0:19999",
-                            "listen_debug": "0.0.0.0:1999",
-                            "agv_online": st.get("agv") is not None,
-                            "nodes_health": st.get("nodes_health"),
-                            "uptime_sec": st.get("uptime_sec"),
-                            "ui": mode,
-                            "web_face_api": WEB_FACE_API,
-                            "env": st.get("env"),
-                            "laser_ok": (st.get("laser") or {}).get("ok"),
-                            "face": {
-                                "ok": (st.get("face") or {}).get("ok"),
-                                "connected": (st.get("face") or {}).get("connected"),
-                                "backend": (st.get("face") or {}).get("backend"),
-                            },
-                        },
-                    )
                     return
                 if path.startswith("/api/camera/") and path.endswith("/stream"):
                     name = path.split("/")[3]
