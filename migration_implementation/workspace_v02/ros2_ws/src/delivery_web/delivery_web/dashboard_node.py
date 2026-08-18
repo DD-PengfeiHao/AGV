@@ -82,8 +82,12 @@ try:
     from delivery_web.blackbox import BlackBoxManager
 except Exception:  # noqa: BLE001
     BlackBoxManager = None  # type: ignore
+try:
+    from delivery_web.map_manager import MapManager
+except Exception:  # noqa: BLE001
+    MapManager = None  # type: ignore
 
-VERSION = "0.52.4"
+VERSION = "0.52.5"
 WEB_FACE_API = 1
 
 FATAL_CODE_MAP: Dict[int, str] = {
@@ -394,6 +398,26 @@ class DashboardNode(Node):
                 )
             except Exception as exc:  # noqa: BLE001
                 self.get_logger().warning(f"BlackBox unavailable: {exc}")
+        self._map_manager = None
+        if MapManager is not None:
+            try:
+                self._map_manager = MapManager(
+                    sync_from_robot=self.sync_map_from_robot,
+                    load_smap=lambda n: self._load_smap(n),
+                    writable_maps_dir=self._writable_maps_dir,
+                    on_event=self._map_manager_event,
+                )
+                if self._blackbox:
+                    self._map_manager.feed_blackbox_events(
+                        lambda kind, code, **kw: self._push_event(
+                            kind,
+                            code,
+                            level=str(kw.get("level", "INFO")),
+                            event=code,
+                        )
+                    )
+            except Exception as exc:  # noqa: BLE001
+                self.get_logger().warning(f"MapManager unavailable: {exc}")
         os.environ.setdefault("ROS_DOMAIN_ID", str(self._device_cfg.ros_domain_id))
         os.environ.setdefault("RMW_IMPLEMENTATION", "rmw_fastrtps_cpp")
         self._agv_adapter: Any = None
@@ -533,7 +557,6 @@ class DashboardNode(Node):
                 daemon=True,
                 name="boot-adapter-connect",
             ).start()
-            threading.Thread(target=self._boot_map_sync, daemon=True).start()
 
         self.create_subscription(AgvStatus, "agv/status", self._on_agv, 10)
         self.create_subscription(ArmStatus, "arm/left/status", self._on_arm_left, 10)
@@ -588,7 +611,29 @@ class DashboardNode(Node):
         self.create_timer(30.0, self._stack_watchdog_tick, callback_group=self._cg)
         self.create_timer(2.0, self._vision_status_tick, callback_group=self._cg)
         self.create_timer(0.5, self._blackbox_tick, callback_group=self._cg)
+        self.create_timer(5.0, self._map_manager_tick, callback_group=self._cg)
         self._init_complete = True
+
+    def _map_manager_event(self, code: str, level: str, data: Dict[str, Any]) -> None:
+        try:
+            self._push_event("map_manager", code, level=level, data=data)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _map_manager_tick(self) -> None:
+        mm = getattr(self, "_map_manager", None)
+        if not mm:
+            return
+        try:
+            mm.reconcile(self.snapshot(), reason="periodic")
+        except Exception as exc:  # noqa: BLE001
+            self.get_logger().warning(f"MapManager reconcile: {exc}")
+
+    def map_manager_status(self) -> Dict[str, Any]:
+        mm = getattr(self, "_map_manager", None)
+        if not mm:
+            return {"success": False, "available": False, "message": "MapManager unavailable"}
+        return {"success": True, "available": True, **mm.status_dict()}
 
     def _resolve_www_paths(self) -> None:
         candidates = [
@@ -1821,6 +1866,9 @@ class DashboardNode(Node):
                     "uptime_sec": time.time() - self._t0,
                     "alerts": self._collect_system_alerts(),
                 }
+                mm = getattr(self, "_map_manager", None)
+                if mm:
+                    light["map_manager"] = mm.blackbox_map_state()
             bb.feed_state(light)
         except Exception:  # noqa: BLE001
             pass
@@ -1897,6 +1945,9 @@ class DashboardNode(Node):
             out["arm"] = arm_cached if arm_cached else {}
             out["alerts"] = self._collect_system_alerts()
             out["devices"] = self._device_cfg.public_dict()
+            mm = getattr(self, "_map_manager", None)
+            if mm:
+                out["map_manager"] = mm.status_dict()
             return out
 
     def verbose_log_status(self) -> Dict[str, bool]:
@@ -3265,6 +3316,20 @@ class DashboardNode(Node):
                 if path == "/api/maps/robot":
                     self._json(200, node.sync_map_from_robot())
                     return
+                if path == "/api/map/status":
+                    self._json(200, node.map_manager_status())
+                    return
+                if path == "/api/map/list":
+                    mm = getattr(node, "_map_manager", None)
+                    if mm:
+                        self._json(200, mm.list_maps())
+                    else:
+                        self._json(200, node.list_maps())
+                    return
+                if path == "/api/map/cache":
+                    mm = getattr(node, "_map_manager", None)
+                    self._json(200, mm.cache_info() if mm else {"success": False})
+                    return
                 if path == "/api/config/devices":
                     self._json(200, {"success": True, "devices": node._device_cfg.public_dict()})
                     return
@@ -3650,7 +3715,28 @@ class DashboardNode(Node):
                     self._json(200, node.switch_robot_map(name))
                     return
                 if path == "/api/maps/refresh":
-                    self._json(200, node.sync_map_from_robot())
+                    mm = getattr(node, "_map_manager", None)
+                    if mm:
+                        self._json(200, mm.refresh())
+                    else:
+                        self._json(200, node.sync_map_from_robot())
+                    return
+                if path == "/api/map/preload":
+                    mm = getattr(node, "_map_manager", None)
+                    if not mm:
+                        self._json(503, {"success": False, "accepted": False, "message": "MapManager unavailable"})
+                        return
+                    from delivery_web.map_manager.schema import MapIdentity
+
+                    ident = MapIdentity.from_dict(payload.get("identity") or {})
+                    if payload.get("map_id"):
+                        ident.map_id = str(payload["map_id"])
+                        ident.name = ident.map_id
+                    self._json(200, mm.preload(ident if ident.map_id else None))
+                    return
+                if path == "/api/map/refresh":
+                    mm = getattr(node, "_map_manager", None)
+                    self._json(200, mm.refresh() if mm else node.sync_map_from_robot())
                     return
                 if path == "/api/stations/add":
                     sid = str(payload.get("station_id") or payload.get("name") or "").strip()

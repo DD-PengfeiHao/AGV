@@ -21,7 +21,8 @@
 
     applyState(fullState) {
       try {
-        this._scene.apply(fullState);
+        const mm = global.mapManager ? global.mapManager.getMapState() : null;
+        this._scene.apply(fullState, mm);
         this._camera.bindToPose(this._scene.pose);
         this._error = null;
       } catch (err) {
@@ -43,12 +44,13 @@
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       this._camera.updateBounds(w, h);
 
-      ctx.fillStyle = '#F7F8FA';
+      const fallback = this._scene.mapState.fallbackPointCloud;
+      ctx.fillStyle = fallback ? '#E8EAED' : '#F7F8FA';
       ctx.fillRect(0, 0, w, h);
 
       const wts = (x, y) => this._camera.worldToScreen(x, y, w, h);
 
-      if (this._layers.map && this._scene.map.cloud.length) {
+      if (!fallback && this._layers.map && this._scene.map.cloud.length) {
         ctx.fillStyle = 'rgba(55,65,81,0.55)';
         const cloud = this._scene.map.cloud;
         const step = Math.max(1, Math.floor(cloud.length / 3500));
@@ -58,7 +60,7 @@
         }
       }
 
-      if (this._layers.map) {
+      if (!fallback && this._layers.map) {
         (this._scene.map.curves || []).forEach((cu) => {
           const pts = cu.points || [];
           if (pts.length < 2) return;
@@ -83,7 +85,7 @@
         });
       }
 
-      if (this._layers.stations) {
+      if (!fallback && this._layers.stations) {
         Object.entries(this._scene.stations).forEach(([n, s]) => {
           const [sx, sy] = wts(s.x, s.y);
           const isTarget = n === this._scene.targetId;
@@ -112,6 +114,16 @@
         ctx.closePath();
         ctx.fill();
         ctx.restore();
+      }
+
+      if (fallback) {
+        ctx.fillStyle = 'rgba(17,17,17,0.75)';
+        ctx.font = '11px JetBrains Mono, monospace';
+        ctx.fillText('LIVE POINT CLOUD ONLY', 12, h - 14);
+      } else if (this._scene.map.source) {
+        ctx.fillStyle = 'rgba(17,17,17,0.55)';
+        ctx.font = '10px Inter, sans-serif';
+        ctx.fillText(`MAP: ${this._scene.map.source}`, 12, h - 14);
       }
     }
 

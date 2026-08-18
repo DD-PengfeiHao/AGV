@@ -44,16 +44,19 @@
 
       const ss = global.stateStore;
       ss.start();
+      if (global.mapManager) global.mapManager.start();
 
       this._unsubLegacy = ss.subscribe('*', (slice, full) => {
         if (global.state) global.state = full;
         if (global.AlertQueue && full && full.alerts) {
           global.AlertQueue.syncFromState(full.alerts);
         }
+        if (global.mapManager) global.mapManager.reconcile(full, 'state_update');
         if (this._sceneRenderer) {
           this._sceneRenderer.applyState(full);
         }
         if (typeof global.renderHeader === 'function') global.renderHeader();
+        this._updateMapBanner();
       });
 
       const loop = () => {
@@ -74,6 +77,7 @@
 
     destroy() {
       if (!this._started) return;
+      if (global.mapManager) global.mapManager.stop();
       if (global.stateStore) global.stateStore.stop();
       if (this._groupRegistry) this._groupRegistry.unmountAll();
       if (this._unsubLegacy) { this._unsubLegacy(); this._unsubLegacy = null; }
@@ -103,13 +107,15 @@
       if (V2.registerAgvObserve) V2.registerAgvObserve(cr);
       if (V2.registerDebugComponents) V2.registerDebugComponents(cr);
       if (V2.registerBlackBoxUi) V2.registerBlackBoxUi(cr);
+      if (V2.registerMapStatus) V2.registerMapStatus(cr);
+      if (V2.registerMapInspector) V2.registerMapInspector(cr);
 
       gr.register('system', {
         title: 'System',
         order: 10,
         size: 'sm',
         collapsed: false,
-        components: ['blackbox.status'],
+        components: ['blackbox.status', 'system.map_status'],
       });
       gr.register('agv', {
         title: 'AGV · Observe',
@@ -128,7 +134,7 @@
         order: 80,
         size: 'md',
         requiredPermission: 'admin',
-        components: ['state_store.debug', 'debug.api_latency'],
+        components: ['state_store.debug', 'debug.api_latency', 'debug.map_inspector'],
       });
       gr.register('events', { title: 'Events', order: 90, size: 'sm', collapsed: true, components: [] });
     },
@@ -150,6 +156,34 @@
       btnZoomIn?.addEventListener('click', () => { cam.zoom(-1); this._sceneRenderer.render(); });
       btnZoomOut?.addEventListener('click', () => { cam.zoom(1); this._sceneRenderer.render(); });
       btnHome?.addEventListener('click', () => { cam.home(); this._sceneRenderer.render(); });
+    },
+
+    _updateMapBanner() {
+      const el = document.getElementById('v2MapBanner');
+      if (!el || !global.mapManager) return;
+      const mm = global.mapManager.getMapState();
+      let text = '';
+      let cls = 'v2-map-banner';
+      if (mm.fallbackPointCloud || mm.status === 'LIVE_POINT_CLOUD_ONLY' || mm.status === 'MAP_MISMATCH') {
+        text = mm.status === 'MAP_MISMATCH'
+          ? '地图不匹配 — 仅显示实时点云'
+          : '当前地图不可用 — 使用实时点云';
+        cls += ' warn';
+      } else if (mm.status === 'DOWNLOADING' || mm.status === 'PRELOADING') {
+        const name = (mm.next && mm.next.map_id) || (mm.current && mm.current.map_id) || '';
+        text = `地图准备中 ${name} ${mm.progress || 0}%`;
+        cls += ' info';
+      } else if (mm.status === 'STALE' || mm.agv_link === 'OFFLINE') {
+        text = 'AGV 离线 — 显示上次已知地图 (STALE)';
+        cls += ' warn';
+      }
+      if (text) {
+        el.textContent = text;
+        el.className = cls;
+        el.classList.remove('hidden');
+      } else {
+        el.classList.add('hidden');
+      }
     },
 
     _updateHud() {

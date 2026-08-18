@@ -49,8 +49,16 @@ header.header{
 .lock-sw{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--text);
   border:1px solid var(--line);border-radius:999px;padding:4px 10px;background:#fff;white-space:nowrap;cursor:pointer}
 .lock-sw input{accent-color:var(--brand-red)}
-.hdr-map{display:flex;align-items:center;gap:6px;flex-shrink:0}
-.hdr-map select{max-width:140px}
+.hdr-map{display:none}
+.app-v2 .hdr-map{display:none !important}
+.v2-map-banner{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:12;padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;background:rgba(255,255,255,0.85);border:1px solid var(--glass-border);box-shadow:0 2px 8px rgba(0,0,0,0.08)}
+.v2-map-banner.warn{background:rgba(254,243,199,0.92);border-color:#f59e0b;color:#92400e}
+.v2-map-banner.info{background:rgba(219,234,254,0.92);border-color:#3b82f6;color:#1e40af}
+.v2-map-status .v2-row{display:flex;justify-content:space-between;gap:8px;font-size:12px;margin:4px 0}
+.v2-map-status .ok{color:var(--good)}
+.v2-map-status .warn{color:var(--warn)}
+.v2-map-status .bad{color:var(--bad)}
+.v2-map-inspector{font-size:10px;max-height:240px;overflow:auto;white-space:pre-wrap}
 .hdr-chip{font-size:11px;color:var(--muted);white-space:nowrap;font-family:var(--font-mono)}
 .header-logo{display:flex;align-items:baseline;font-size:20px;font-weight:700;letter-spacing:-0.5px;cursor:default;white-space:nowrap}
 .logo-industrial{color:var(--brand-black);font-weight:700}
@@ -429,10 +437,6 @@ select,input[type=text],input[type=number]{
       <input type="checkbox" id="ctlLock" checked/> 控制权
     </label>
   </div>
-  <div class="hdr-map">
-    <select id="mapSel"></select>
-    <button class="btn btn-sm" id="btnRefreshMap">刷新地图</button>
-  </div>
   <span class="hdr-chip" id="adapterStatus">Robokit: —</span>
   <span class="hdr-chip" id="hdrVehicle">电量 —</span>
   <span class="hdr-chip" id="hdrPose">X —</span>
@@ -455,6 +459,7 @@ select,input[type=text],input[type=number]{
   <section id="v2Main" class="v2-main">
     <section class="v2-scene-section">
       <canvas id="v2SceneCanvas" aria-label="AGV Overview Scene"></canvas>
+      <div id="v2MapBanner" class="v2-map-banner hidden" role="status"></div>
       <div class="v2-view-hud" id="v2ViewHud"></div>
       <div class="v2-scene-tools">
         <button type="button" id="v2BtnFollow" class="active" title="跟随 AGV">跟随</button>
@@ -733,6 +738,8 @@ select,input[type=text],input[type=number]{
 <script src="v2/store/event_store.js"></script>
 <script src="v2/store/telemetry_store.js"></script>
 <script src="v2/store/state_store.js"></script>
+<script src="v2/map/map_identity.js"></script>
+<script src="v2/map/map_manager.js"></script>
 <script src="v2/registry/component_registry.js"></script>
 <script src="v2/registry/group_registry.js"></script>
 <script src="v2/scene/scene_state.js"></script>
@@ -740,7 +747,9 @@ select,input[type=text],input[type=number]{
 <script src="v2/scene/view_controller.js"></script>
 <script src="v2/scene/scene_renderer.js"></script>
 <script src="v2/components/agv/observe.js"></script>
+<script src="v2/components/system/map_status.js"></script>
 <script src="v2/components/debug/metrics.js"></script>
+<script src="v2/components/debug/map_inspector.js"></script>
 <script src="v2/blackbox/blackbox_client.js"></script>
 <script src="v2/blackbox/blackbox_shortcut.js"></script>
 <script src="v2/blackbox/blackbox_ui.js"></script>
@@ -1522,16 +1531,7 @@ async function pollArm() {
 function renderJason() { renderVision(); }
 
 function renderMapSelect() {
-  const sel = $('#mapSel');
-  const maps = state?.map?.available || [];
-  if (!maps.length) return;
-  const cur = state?.map?.smap_file || '';
-  sel.innerHTML = maps.map(x => {
-    const file = x.file || x;
-    const label = x.name || String(file).replace('.smap', '');
-    return `<option value="${file}">${label}</option>`;
-  }).join('');
-  if (cur) sel.value = cur;
+  /* V0.52.5: manual map dropdown removed — MapManager handles map lifecycle */
 }
 
 function render() {
@@ -1540,7 +1540,6 @@ function render() {
   fillStationSelects();
   renderRouteChips();
   renderRouteStatus();
-  renderMapSelect();
   renderVision();
   if (state.arm) { armState = state.arm; renderArm(); }
   drawMap();
@@ -1572,12 +1571,7 @@ async function pollState() {
       window.StatusBanner.sync(state.alerts);
     }
     render();
-    if (!mapSynced) {
-      mapSynced = true;
-      fetch('/api/maps/robot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-        .then(() => pollState())
-        .catch(() => {});
-    }
+    /* V0.52.5: map sync delegated to backend MapManager — no manual /api/maps/robot */
   } catch (e) {
     if (state?.env?.adapter_connected) {
       $('#agvStatus').textContent = 'STALE';
@@ -1731,16 +1725,7 @@ mapEl.addEventListener('wheel', e => {
   drawMap();
 }, { passive: false });
 
-$('#btnRefreshMap').onclick = async () => {
-  const name = $('#mapSel').value;
-  if (name) {
-    await fetch('/api/maps/switch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ map_name: name.replace('.smap','') }) });
-  } else {
-    await fetch('/api/maps/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-  }
-  mapReady = false;
-  await pollState();
-};
+/* Manual map refresh removed — MapManager V1 */
 
 async function navigateTo(target) {
   target = String(target || selectedNavStation || $('#navStation')?.value || '').trim();
