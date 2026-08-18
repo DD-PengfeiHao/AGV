@@ -30,8 +30,9 @@
       }
 
       document.body.classList.add('app-v2');
-      const legacy = document.getElementById('legacyMain');
-      if (legacy) legacy.classList.add('legacy-hidden');
+      /* Keep legacy widgets/panels until V2 reaches component parity */
+      // const legacy = document.getElementById('legacyMain');
+      // if (legacy) legacy.classList.add('legacy-hidden');
 
       const camera = new V2.CameraController();
       this._viewController = new V2.ViewController(camera);

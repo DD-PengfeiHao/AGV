@@ -87,7 +87,7 @@ try:
 except Exception:  # noqa: BLE001
     MapManager = None  # type: ignore
 
-VERSION = "0.52.5"
+VERSION = "0.52.6"
 WEB_FACE_API = 1
 
 FATAL_CODE_MAP: Dict[int, str] = {

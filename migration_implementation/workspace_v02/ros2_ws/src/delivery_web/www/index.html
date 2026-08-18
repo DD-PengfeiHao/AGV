@@ -265,7 +265,10 @@ main{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden;posi
 .map-tools button:hover{background:rgba(255,255,255,0.9);border-color:rgba(0,0,0,0.12)}
 .map-tools button.active{border-color:var(--brand-red);color:var(--brand-red);background:rgba(229,54,74,0.06)}
 
-/* Legacy panels */
+/* V2 preview shell — hidden until body.app-v2 (not production-ready) */
+#v2Main { display: none; }
+body.app-v2 #v2Main { display: flex; }
+/* Legacy widget source nodes (adopted into #widgetLayer) */
 .vision-strip,.arm-section,.ops-drawer{display:none}
 .v-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md);display:flex;flex-direction:column;min-width:0;overflow:hidden}
 .v-card-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);flex-shrink:0}
@@ -734,7 +737,7 @@ select,input[type=text],input[type=number]{
 </div>
 
 <script src="auth.js"></script>
-<script>window.APP_MODE = 'V2';</script>
+<script>window.APP_MODE = 'LEGACY'; /* V2 preview: set 'V2' only when widget parity is ready */</script>
 <script src="v2/store/event_store.js"></script>
 <script src="v2/store/telemetry_store.js"></script>
 <script src="v2/store/state_store.js"></script>
@@ -1896,16 +1899,14 @@ async function bootApp() {
   Auth.applyUi();
   if (!Auth.isLoggedIn()) return;
   if (!Auth.isAdmin()) delete window.WIDGET_REGISTRY.verbose_log;
-  if (window.APP_MODE === 'V2' && window.V2Bootstrap) {
-    V2Bootstrap.start();
-    pollHeartbeat();
-    return;
-  }
   initWidgets();
   pollHeartbeat();
   pollState();
   pollWristLive();
   loadRestartComponents();
+  if (window.APP_MODE === 'V2' && window.V2Bootstrap) {
+    V2Bootstrap.start();
+  }
 }
 bootApp();
 
@@ -1915,13 +1916,14 @@ $('#btnLoginSubmit')?.addEventListener('click', async () => {
     await Auth.login($('#loginUsername')?.value, $('#loginPassword')?.value);
     Auth.applyUi();
     if (!Auth.isAdmin()) delete window.WIDGET_REGISTRY.verbose_log;
+    initWidgets();
+    pollState();
+    pollWristLive();
+    loadRestartComponents();
     if (window.APP_MODE === 'V2' && window.V2Bootstrap) {
       V2Bootstrap.start();
-      pollHeartbeat();
-    } else {
-      initWidgets();
-      pollState();
     }
+    pollHeartbeat();
     errEl.textContent = '';
   } catch (e) {
     errEl.textContent = e.message || '登录失败';
