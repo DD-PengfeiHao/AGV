@@ -106,6 +106,7 @@
       const header = document.querySelector('header.header');
       // V2: overview visible without login; login panel via logo click
       loginModal?.classList.remove('show');
+      if (loginModal) loginModal.style.display = 'none';
       if (mainEl) mainEl.style.visibility = '';
       if (header) header.style.visibility = '';
 

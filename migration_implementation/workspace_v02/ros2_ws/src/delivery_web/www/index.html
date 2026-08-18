@@ -726,7 +726,7 @@ select,input[type=text],input[type=number]{
   <div class="widget-panel-hint">提示：点击组件卡片右上角 × 也可关闭</div>
 </div>
 
-<div class="modal show" id="loginModal" style="z-index:2000">
+<div class="modal hidden" id="loginModal" style="z-index:2000;display:none!important">
   <div class="modal-box" style="min-width:340px">
     <h4>登录 AGV 控制台</h4>
     <p class="st-meta" style="margin-bottom:12px">首次登录请立即修改默认密码。管理员默认账户：ubuntu / ubuntu</p>
@@ -1956,6 +1956,7 @@ $('#btnLoginSlideSubmit')?.addEventListener('click', async () => {
     if (window.widgetMgr) await window.widgetMgr.restoreFromStorage(['agv_status', 'jason_camera_a', 'jason_camera_b', 'leo_camera', 'arm_control', 'nav_control', 'operation_log']);
     loadRestartComponents();
     if (window.ViewShell) ViewShell.closeLogin();
+    else closeLoginPanel();
     errEl.textContent = '';
     showToast('登录成功', 'ok');
   } catch (e) {
@@ -1969,7 +1970,28 @@ $('#btnLoginSlideLogout')?.addEventListener('click', async () => {
   if (window.V2Bootstrap) V2Bootstrap.start();
   if (window.ViewShell) ViewShell.closeLogin();
 });
-$('#loginSlideBackdrop')?.addEventListener('click', () => { if (window.ViewShell) ViewShell.closeLogin(); });
+$('#loginSlideBackdrop')?.addEventListener('click', () => {
+  if (window.ViewShell) ViewShell.closeLogin();
+  else closeLoginPanel();
+});
+
+function openLoginPanel() {
+  document.getElementById('loginSlidePanel')?.classList.add('open');
+  document.getElementById('loginSlideBackdrop')?.classList.add('open');
+  document.getElementById('loginModal')?.classList.remove('show');
+}
+function closeLoginPanel() {
+  document.getElementById('loginSlidePanel')?.classList.remove('open');
+  document.getElementById('loginSlideBackdrop')?.classList.remove('open');
+}
+window.openLoginPanel = openLoginPanel;
+window.closeLoginPanel = closeLoginPanel;
+
+document.getElementById('headerLogo')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  openLoginPanel();
+});
 
 $('#btnLoginSubmit')?.addEventListener('click', async () => {
   const errEl = $('#loginError');
@@ -2353,10 +2375,9 @@ window.onVerboseStatusChange = function (status) {
 
 function initWidgets() {
   if (window.__widgetsInited) return;
-  window.__widgetsInited = true;
   if (window.Auth && Auth.isLoggedIn() && !Auth.isAdmin()) delete window.WIDGET_REGISTRY.verbose_log;
   widgetMgr = new WidgetManager('widgetLayer');
-  global.widgetMgr = widgetMgr;
+  window.widgetMgr = widgetMgr;
   const defaults = ['agv_status', 'jason_camera_a', 'jason_camera_b', 'leo_camera', 'arm_control', 'nav_control', 'operation_log'];
   widgetMgr.restoreFromStorage(defaults);
   $('#btnAddWidget')?.addEventListener('click', () => widgetMgr.openPicker());
@@ -2368,6 +2389,7 @@ function initWidgets() {
     widgetMgr.widgets.forEach((card) => widgetMgr._clampCard(card));
     widgetMgr._scheduleSaveLayout();
   });
+  window.__widgetsInited = true;
 }
 
 if (document.readyState === 'loading') {

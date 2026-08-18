@@ -65,6 +65,10 @@
     },
 
     _openLogin() {
+      if (typeof global.openLoginPanel === 'function') {
+        global.openLoginPanel();
+        return;
+      }
       const panel = document.getElementById('loginSlidePanel');
       const backdrop = document.getElementById('loginSlideBackdrop');
       panel?.classList.add('open');
@@ -72,6 +76,10 @@
     },
 
     closeLogin() {
+      if (typeof global.closeLoginPanel === 'function') {
+        global.closeLoginPanel();
+        return;
+      }
       document.getElementById('loginSlidePanel')?.classList.remove('open');
       document.getElementById('loginSlideBackdrop')?.classList.remove('open');
     },

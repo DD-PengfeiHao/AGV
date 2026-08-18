@@ -43,6 +43,8 @@
         this._updateMapBanner();
       });
 
+      ss.fetchOnce().catch(() => {});
+
       this._probeVersionLatency();
       this._started = true;
       if (global.AGV_V2 && global.AGV_V2.initBlackBoxShortcut) global.AGV_V2.initBlackBoxShortcut();
