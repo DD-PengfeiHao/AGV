@@ -87,7 +87,7 @@ try:
 except Exception:  # noqa: BLE001
     MapManager = None  # type: ignore
 
-VERSION = "0.52.6"
+VERSION = "0.53.0"
 WEB_FACE_API = 1
 
 FATAL_CODE_MAP: Dict[int, str] = {
@@ -1907,6 +1907,27 @@ class DashboardNode(Node):
             return {"success": False, "message": "BlackBox unavailable"}
         return bb.get_record(record_id)
 
+    def _user_layout_path(self, username: str) -> Path:
+        maps_rw = Path(os.environ.get("MAPS_RW_DIR", "/opt/delivery_ws/maps_rw"))
+        d = maps_rw / "user_layouts"
+        d.mkdir(parents=True, exist_ok=True)
+        safe = "".join(c for c in str(username) if c.isalnum() or c in "._-") or "user"
+        return d / f"{safe}.json"
+
+    def get_user_layout(self, username: str) -> Dict[str, Any]:
+        p = self._user_layout_path(username)
+        if p.is_file():
+            try:
+                return json.loads(p.read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001
+                pass
+        return {"v": 2, "open": [], "widgets": {}}
+
+    def save_user_layout(self, username: str, layout: Dict[str, Any]) -> Dict[str, Any]:
+        p = self._user_layout_path(username)
+        p.write_text(json.dumps(layout, ensure_ascii=False, indent=2), encoding="utf-8")
+        return {"success": True, "message": "layout saved"}
+
     def snapshot(self) -> Dict[str, Any]:
         vision = self._vision_snapshot()
         with self._lock:
@@ -3110,6 +3131,15 @@ class DashboardNode(Node):
                     return None
                 return user
 
+            def _require_restart(self):
+                user = self._require_login()
+                if not user:
+                    return None
+                if not node._web_auth.can_restart(user):
+                    self._json(403, {"success": False, "message": "需要开发或管理员权限"})
+                    return None
+                return user
+
             def _check_admin_route(self, path: str) -> bool:
                 if not node._web_auth.is_admin_route(path):
                     return True
@@ -3120,7 +3150,7 @@ class DashboardNode(Node):
                     return True
                 if node._web_auth.requires_login(path) and self._require_login() is None:
                     return False
-                if node._web_auth.is_danger_route(path) and self._require_admin() is None:
+                if node._web_auth.is_danger_route(path) and self._require_restart() is None:
                     return False
                 if node._web_auth.is_admin_route(path) and self._require_admin() is None:
                     return False
@@ -3329,6 +3359,13 @@ class DashboardNode(Node):
                 if path == "/api/map/cache":
                     mm = getattr(node, "_map_manager", None)
                     self._json(200, mm.cache_info() if mm else {"success": False})
+                    return
+                if path == "/api/user/layout":
+                    user = self._require_login()
+                    if not user:
+                        return
+                    layout = node.get_user_layout(str(user.get("username", "")))
+                    self._json(200, {"success": True, "layout": layout})
                     return
                 if path == "/api/config/devices":
                     self._json(200, {"success": True, "devices": node._device_cfg.public_dict()})
@@ -3646,6 +3683,14 @@ class DashboardNode(Node):
                     out = node.blackbox_trigger(payload, user=username)
                     code = 200 if out.get("success") else 400
                     self._json(code, out)
+                    return
+                if path == "/api/user/layout":
+                    user = self._require_login()
+                    if not user:
+                        return
+                    layout = payload.get("layout") or payload
+                    out = node.save_user_layout(str(user.get("username", "")), layout)
+                    self._json(200, out)
                     return
                 if path == "/api/restart/component":
                     name = str(payload.get("name", "")).strip()

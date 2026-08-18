@@ -290,6 +290,9 @@
       } catch (e) {
         /* ignore */
       }
+      if (global.layoutStore && global.Auth && global.Auth.isLoggedIn()) {
+        global.layoutStore.save(layout);
+      }
     }
 
     _scheduleSaveLayout() {
@@ -340,8 +343,14 @@
       card.style.height = Math.min(height, Math.max(min.h, ch - top)) + 'px';
     }
 
-    restoreFromStorage(defaultIds) {
-      const layout = this._readLayout();
+    async restoreFromStorage(defaultIds) {
+      let layout = null;
+      if (global.layoutStore && global.Auth && global.Auth.isLoggedIn()) {
+        layout = await global.layoutStore.load();
+      }
+      if (!layout || !layout.open) {
+        layout = this._readLayout();
+      }
       const ids = layout.open && layout.open.length ? layout.open : defaultIds;
       this._bulkRestore = true;
       try {
@@ -384,41 +393,71 @@
       const list = document.getElementById('widgetPickerList');
       if (!list) return;
 
-      const items = this.listAvailable();
-      if (!items.length) {
-        list.innerHTML = '<div class="widget-picker-empty">暂无可用组件（注册表为空）</div>';
+      const catalog = global.AGV_V2 && global.AGV_V2.WidgetCatalog;
+      const searchEl = document.getElementById('widgetPickerSearch');
+      const q = (searchEl && searchEl.value || '').trim().toLowerCase();
+      const countEl = document.getElementById('widgetPickerCount');
+      let total = 0;
+
+      if (!catalog) {
+        const items = this.listAvailable();
+        list.innerHTML = items.map((item) => this._pickerRow(item.id, item.title, item.open)).join('');
+        this._bindPickerButtons(list);
+        if (countEl) countEl.textContent = String(items.length);
         return;
       }
 
-      list.innerHTML = items
-        .map((item) => {
-          const isAdded = item.open;
-          const btnText = isAdded ? '− 移除' : '+ 添加';
-          const btnClass = isAdded ? 'widget-remove-btn' : 'widget-add-btn';
-          const icon = this._widgetIcon(item.title);
-          const name = this._widgetName(item.title);
-          return `
-            <div class="widget-list-item" data-widget-id="${item.id}">
-              <div class="widget-list-item-info">
-                <div class="widget-list-item-icon">${icon}</div>
-                <div>
-                  <div class="widget-list-item-name">${name}</div>
-                </div>
-              </div>
-              <button type="button" class="${btnClass}" data-widget-id="${item.id}">${btnText}</button>
-            </div>`;
-        })
-        .join('');
+      const groups = catalog.visibleGroups();
+      const parts = [];
+      groups.forEach((g) => {
+        const rows = g.widgets
+          .filter((id) => this.registry[id])
+          .filter((id) => {
+            if (!q) return true;
+            const title = (this.registry[id].title || id).toLowerCase();
+            return title.includes(q) || id.includes(q);
+          })
+          .map((id) => {
+            total += 1;
+            return this._pickerRow(id, this.registry[id].title, this.isOpen(id));
+          });
+        if (!rows.length) return;
+        const openCount = g.widgets.filter((id) => this.isOpen(id)).length;
+        parts.push(`
+          <details class="widget-group" open>
+            <summary class="widget-group-head"><span>${g.title}</span><span class="widget-group-count">${openCount}/${g.widgets.length}</span></summary>
+            <div class="widget-group-body">${rows.join('')}</div>
+          </details>`);
+      });
+      list.innerHTML = parts.length
+        ? parts.join('')
+        : '<div class="widget-picker-empty">无匹配组件</div>';
+      if (countEl) countEl.textContent = String(total);
+      this._bindPickerButtons(list);
+    }
 
+    _pickerRow(id, title, isOpen) {
+      const btnText = isOpen ? '−' : '+';
+      const btnClass = isOpen ? 'widget-remove-btn' : 'widget-add-btn';
+      const icon = this._widgetIcon(title);
+      const name = this._widgetName(title);
+      return `
+        <div class="widget-list-item" data-widget-id="${id}">
+          <div class="widget-list-item-info">
+            <div class="widget-list-item-icon">${icon}</div>
+            <div><div class="widget-list-item-name">${name}</div></div>
+          </div>
+          <button type="button" class="${btnClass}" data-widget-id="${id}" title="${isOpen ? '移除' : '添加'}">${btnText}</button>
+        </div>`;
+    }
+
+    _bindPickerButtons(list) {
       list.querySelectorAll('button[data-widget-id]').forEach((btn) => {
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
           const wid = btn.dataset.widgetId;
-          if (this.widgets.has(wid)) {
-            this.removeWidget(wid);
-          } else {
-            this.addWidget(wid);
-          }
+          if (this.widgets.has(wid)) this.removeWidget(wid);
+          else this.addWidget(wid);
         });
       });
     }

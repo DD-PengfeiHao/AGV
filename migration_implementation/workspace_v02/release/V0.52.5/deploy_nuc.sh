@@ -48,7 +48,7 @@ docker cp "$TMP/www/widgets.js" "$C:$WWW/widgets.js"
 docker exec "$C" bash -lc "test -f $WWW/v2/map/map_manager.js" || fail "www v2/map/map_manager.js missing (docker cp nest?)"
 docker exec "$C" bash -lc "test -f $WWW/v2/components/system/map_status.js" || fail "www v2/components/system/map_status.js missing"
 
-docker exec "$C" bash -lc "grep -m1 'VERSION = \"0.52.6\"' $PY_DW/dashboard_node.py" || fail "VERSION 0.52.6 not in install path"
+docker exec "$C" bash -lc "grep -m1 'VERSION = \"0.53.0\"' $PY_DW/dashboard_node.py" || fail "VERSION 0.53.0 not in install path"
 docker exec "$C" bash -lc "test -f $PY_DW/blackbox/manager.py" || fail "blackbox package missing"
 docker exec "$C" bash -lc "test -f $PY_DW/map_manager/manager.py" || fail "map_manager package missing"
 

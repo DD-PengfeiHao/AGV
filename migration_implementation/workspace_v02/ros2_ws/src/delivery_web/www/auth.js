@@ -92,6 +92,10 @@
       return !!(this.user && (this.user.is_admin || this.user.role === 'admin'));
     },
 
+    isDev() {
+      return !!(this.user && (this.user.role === 'dev' || this.isAdmin()));
+    },
+
     isLoggedIn() {
       return !!this.user;
     },
@@ -100,28 +104,32 @@
       const loginModal = document.getElementById('loginModal');
       const mainEl = document.querySelector('main');
       const header = document.querySelector('header.header');
-      if (!this.isLoggedIn()) {
-        loginModal?.classList.add('show');
-        if (mainEl) mainEl.style.visibility = 'hidden';
-        if (header) header.style.visibility = 'hidden';
-        return;
-      }
+      // V2: overview visible without login; login panel via logo click
       loginModal?.classList.remove('show');
       if (mainEl) mainEl.style.visibility = '';
       if (header) header.style.visibility = '';
 
+      const loggedIn = this.isLoggedIn();
       const userChip = document.getElementById('authUserChip');
       if (userChip) {
-        userChip.textContent = this.user.username || '—';
-        userChip.title = this.isAdmin() ? '管理员' : '普通用户';
+        if (loggedIn) {
+          userChip.textContent = this.user.username || '—';
+          userChip.title = this.isAdmin() ? '管理员' : (this.user.role === 'dev' ? '开发' : '用户');
+          userChip.classList.remove('hidden');
+        } else {
+          userChip.classList.add('hidden');
+        }
       }
-      document.getElementById('btnAuthLogout')?.classList.toggle('hidden', false);
-      document.getElementById('btnAuthRegister')?.classList.toggle('hidden', !this.isAdmin());
+      document.getElementById('btnAuthLogout')?.classList.toggle('hidden', !loggedIn);
+      document.getElementById('btnAuthRegister')?.classList.toggle('hidden', !loggedIn || !this.isAdmin());
       document.getElementById('btnOpenDebug')?.classList.toggle('hidden', !this.isAdmin());
       document.getElementById('adminRegisterModal')?.classList.toggle('hidden', !this.isAdmin());
-      document.getElementById('authUserChip')?.classList.toggle('hidden', false);
-      document.getElementById('btnRestartComponent')?.classList.toggle('hidden', !this.isAdmin());
-      document.getElementById('btnRestartDocker')?.classList.toggle('hidden', !this.isAdmin());
+      document.getElementById('btnViewSwitch')?.classList.toggle('hidden', !this.isAdmin());
+      document.getElementById('btnLoginSlideLogout')?.classList.toggle('hidden', !loggedIn);
+      document.getElementById('btnLoginSlideSubmit')?.classList.toggle('hidden', loggedIn);
+      const canRestart = this.isDev();
+      document.getElementById('btnRestartComponent')?.classList.toggle('hidden', !canRestart);
+      document.getElementById('btnRestartDocker')?.classList.toggle('hidden', !canRestart);
 
       const chPwd = document.getElementById('changePasswordModal');
       if (this.mustChangePassword()) {

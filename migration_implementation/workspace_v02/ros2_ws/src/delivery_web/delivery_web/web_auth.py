@@ -256,6 +256,31 @@ class WebAuth:
             "/api/heartbeat",
         )
 
+    def is_public_read_route(self, path: str) -> bool:
+        """Read-only endpoints for overview without login."""
+        if path in (
+            "/api/state",
+            "/api/route/status",
+            "/api/stations",
+            "/api/map/status",
+            "/api/map/list",
+            "/api/status",
+            "/api/arm/status",
+            "/api/arm/pose",
+            "/api/arm/gripper",
+        ):
+            return True
+        if path.startswith("/api/vision/") and path.endswith(("/status", "/localization", "/snapshot")):
+            return True
+        if path.startswith("/api/jason/camera/") and path.endswith(("/status", "/snapshot")):
+            return True
+        return False
+
+    def can_restart(self, user: Optional[Dict[str, Any]]) -> bool:
+        if not user:
+            return False
+        return user.get("role") in ("admin", "dev")
+
     def is_admin_route(self, path: str) -> bool:
         if path == "/api/debug":
             return True
@@ -275,4 +300,8 @@ class WebAuth:
             return False
         if path.startswith("/api/auth/session"):
             return False
-        return not self.is_public_route(path)
+        if self.is_public_route(path):
+            return False
+        if self.is_public_read_route(path):
+            return False
+        return True

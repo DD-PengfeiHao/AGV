@@ -265,9 +265,25 @@ main{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden;posi
 .map-tools button:hover{background:rgba(255,255,255,0.9);border-color:rgba(0,0,0,0.12)}
 .map-tools button.active{border-color:var(--brand-red);color:var(--brand-red);background:rgba(229,54,74,0.06)}
 
-/* V2 preview shell — hidden until body.app-v2 (not production-ready) */
-#v2Main { display: none; }
-body.app-v2 #v2Main { display: flex; }
+/* V2 view shell */
+.view-shell{flex:1;display:flex;flex-direction:column;min-height:0;position:relative}
+.bev-pane{flex:1;position:relative;min-height:0;background:#F7F8FA}
+.bev-pane.hidden{display:none!important}
+#bevCanvas{display:block;width:100%;height:100%;cursor:grab;touch-action:none}
+.bev-hud{position:absolute;left:12px;bottom:12px;padding:8px 10px;background:var(--glass-bg);backdrop-filter:blur(8px);border:1px solid var(--border);border-radius:8px;font-size:11px;z-index:5}
+.bev-bind{position:absolute;right:12px;top:12px;z-index:6;font-size:12px;background:rgba(255,255,255,.7);padding:6px 10px;border-radius:8px}
+body.app-v2 #v2Main{display:none!important}
+body.app-v2 .map-section{flex:1}
+.widget-group{margin:8px 0;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.widget-group-head{display:flex;justify-content:space-between;padding:10px 14px;font-weight:600;cursor:pointer;background:rgba(255,255,255,.5)}
+.widget-group-count{font-size:11px;color:var(--muted)}
+.widget-picker-search{width:calc(100% - 32px);margin:12px 16px 0;padding:8px 10px;border:1px solid var(--line);border-radius:8px}
+.widget-picker-count{font-size:12px;color:var(--muted);padding:4px 20px 8px}
+.login-slide-panel{position:fixed;top:var(--header-h);left:0;bottom:0;width:320px;max-width:90vw;background:rgba(255,255,255,.95);backdrop-filter:blur(12px);border-right:1px solid var(--line);z-index:1200;transform:translateX(-100%);transition:transform .25s ease;display:flex;flex-direction:column;padding:20px}
+.login-slide-panel.open{transform:translateX(0)}
+.login-slide-backdrop{position:fixed;inset:0;top:var(--header-h);background:rgba(0,0,0,.2);z-index:1190;display:none}
+.login-slide-backdrop.open{display:block}
+.header-logo{cursor:pointer}
 /* Legacy widget source nodes (adopted into #widgetLayer) */
 .vision-strip,.arm-section,.ops-drawer{display:none}
 .v-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md);display:flex;flex-direction:column;min-width:0;overflow:hidden}
@@ -428,7 +444,7 @@ select,input[type=text],input[type=number]{
 <body>
 <header class="header">
   <div class="header-left">
-    <div class="header-logo" title="IndustrialNext">
+    <div class="header-logo" id="headerLogo" title="点击登录 / 用户管理">
       <span class="logo-industrial">Industrial</span><span class="logo-next">Next</span>
     </div>
     <button type="button" id="btnAddWidget" class="btn btn-primary btn-sm">+ 组件</button>
@@ -447,6 +463,7 @@ select,input[type=text],input[type=number]{
   <span id="demoAgvInfo" style="display:none"></span>
   <span class="spacer"></span>
   <div class="header-actions restart-group">
+    <button type="button" class="btn btn-sm hidden" id="btnViewSwitch" title="切换 BEV 第三人称视角（管理员）">BEV</button>
     <span class="hdr-chip hidden" id="authUserChip" title="当前用户">—</span>
     <button type="button" class="btn btn-sm hidden" id="btnOpenDebug" title="Debug 控制台（管理员）">Debug</button>
     <button type="button" class="btn btn-sm hidden" id="btnAuthRegister" title="注册新用户">注册用户</button>
@@ -459,10 +476,10 @@ select,input[type=text],input[type=number]{
 <div id="alertContainer" class="alert-container"></div>
 
 <main>
-  <section id="v2Main" class="v2-main">
+  <div id="viewShell" class="view-shell">
+  <section id="v2Main" class="v2-main hidden">
     <section class="v2-scene-section">
       <canvas id="v2SceneCanvas" aria-label="AGV Overview Scene"></canvas>
-      <div id="v2MapBanner" class="v2-map-banner hidden" role="status"></div>
       <div class="v2-view-hud" id="v2ViewHud"></div>
       <div class="v2-scene-tools">
         <button type="button" id="v2BtnFollow" class="active" title="跟随 AGV">跟随</button>
@@ -628,6 +645,8 @@ select,input[type=text],input[type=number]{
   </details>
   </div><!-- /widgetSource -->
   </div><!-- /legacyMain -->
+  <div id="v2MapBanner" class="v2-map-banner hidden" role="status"></div>
+  </div><!-- /viewShell -->
 </main>
 
 <div id="toastHost"></div>
@@ -682,15 +701,27 @@ select,input[type=text],input[type=number]{
   </div>
 </div>
 
+<div class="login-slide-backdrop" id="loginSlideBackdrop"></div>
+<div class="login-slide-panel" id="loginSlidePanel">
+  <h4 style="margin:0 0 12px">登录</h4>
+  <div id="loginSlideError" style="color:var(--bad);font-size:12px;min-height:1.2em"></div>
+  <label style="display:block;margin:8px 0;font-size:12px">用户名<input id="loginSlideUser" type="text" style="width:100%;margin-top:4px;padding:8px;border:1px solid var(--line);border-radius:8px"/></label>
+  <label style="display:block;margin:8px 0;font-size:12px">密码<input id="loginSlidePass" type="password" style="width:100%;margin-top:4px;padding:8px;border:1px solid var(--line);border-radius:8px"/></label>
+  <button type="button" class="btn btn-primary" id="btnLoginSlideSubmit" style="width:100%;margin-top:8px">登录</button>
+  <button type="button" class="btn hidden" id="btnLoginSlideLogout" style="width:100%;margin-top:8px">退出登录</button>
+  <p style="font-size:11px;color:var(--muted);margin-top:16px">未登录可查看总览；控制操作与 BEV 需登录。</p>
+</div>
+
 <div class="widget-panel-backdrop" id="widgetPickerBackdrop"></div>
 <div class="widget-panel" id="widgetPicker">
   <div class="widget-panel-header">
     <div>
       <h4 class="widget-panel-title">添加组件</h4>
-      <div class="widget-panel-subtitle">选择要显示在地图上的悬浮组件</div>
+      <div class="widget-panel-subtitle">关联件 · 机械臂 · 相机 · 导航 <span id="widgetPickerCount">0</span></div>
     </div>
     <button type="button" class="widget-panel-close" id="btnWidgetPickerClose" title="关闭">×</button>
   </div>
+  <input type="search" class="widget-picker-search" id="widgetPickerSearch" placeholder="搜索组件…"/>
   <div id="widgetPickerList"></div>
   <div class="widget-panel-hint">提示：点击组件卡片右上角 × 也可关闭</div>
 </div>
@@ -737,7 +768,7 @@ select,input[type=text],input[type=number]{
 </div>
 
 <script src="auth.js"></script>
-<script>window.APP_MODE = 'LEGACY'; /* V2 preview: set 'V2' only when widget parity is ready */</script>
+<script>window.APP_MODE = 'V2';</script>
 <script src="v2/store/event_store.js"></script>
 <script src="v2/store/telemetry_store.js"></script>
 <script src="v2/store/state_store.js"></script>
@@ -756,6 +787,10 @@ select,input[type=text],input[type=number]{
 <script src="v2/blackbox/blackbox_client.js"></script>
 <script src="v2/blackbox/blackbox_shortcut.js"></script>
 <script src="v2/blackbox/blackbox_ui.js"></script>
+<script src="v2/catalog/widget_catalog.js"></script>
+<script src="v2/store/layout_store.js"></script>
+<script src="v2/scene/bev_renderer.js"></script>
+<script src="v2/app/view_shell.js"></script>
 <script src="v2/app/bootstrap.js"></script>
 <script src="widgets.js"></script>
 <script src="alert_queue.js"></script>
@@ -1897,18 +1932,44 @@ bindVisionActions();
 async function bootApp() {
   await Auth.init();
   Auth.applyUi();
-  if (!Auth.isLoggedIn()) return;
-  if (!Auth.isAdmin()) delete window.WIDGET_REGISTRY.verbose_log;
   initWidgets();
   pollHeartbeat();
-  pollState();
-  pollWristLive();
-  loadRestartComponents();
   if (window.APP_MODE === 'V2' && window.V2Bootstrap) {
     V2Bootstrap.start();
+  } else {
+    pollState();
   }
+  pollWristLive();
+  if (Auth.isLoggedIn()) loadRestartComponents();
 }
 bootApp();
+
+$('#btnLoginSlideSubmit')?.addEventListener('click', async () => {
+  const errEl = document.getElementById('loginSlideError');
+  try {
+    await Auth.login(
+      document.getElementById('loginSlideUser')?.value,
+      document.getElementById('loginSlidePass')?.value
+    );
+    Auth.applyUi();
+    if (!Auth.isAdmin()) delete window.WIDGET_REGISTRY.verbose_log;
+    if (window.widgetMgr) await window.widgetMgr.restoreFromStorage(['agv_status', 'jason_camera_a', 'jason_camera_b', 'leo_camera', 'arm_control', 'nav_control', 'operation_log']);
+    loadRestartComponents();
+    if (window.ViewShell) ViewShell.closeLogin();
+    errEl.textContent = '';
+    showToast('登录成功', 'ok');
+  } catch (e) {
+    errEl.textContent = e.message || '登录失败';
+  }
+});
+$('#btnLoginSlideLogout')?.addEventListener('click', async () => {
+  if (window.V2Bootstrap) V2Bootstrap.destroy();
+  await Auth.logout();
+  Auth.applyUi();
+  if (window.V2Bootstrap) V2Bootstrap.start();
+  if (window.ViewShell) ViewShell.closeLogin();
+});
+$('#loginSlideBackdrop')?.addEventListener('click', () => { if (window.ViewShell) ViewShell.closeLogin(); });
 
 $('#btnLoginSubmit')?.addEventListener('click', async () => {
   const errEl = $('#loginError');
@@ -2293,13 +2354,15 @@ window.onVerboseStatusChange = function (status) {
 function initWidgets() {
   if (window.__widgetsInited) return;
   window.__widgetsInited = true;
-  if (window.Auth && !Auth.isAdmin()) delete window.WIDGET_REGISTRY.verbose_log;
+  if (window.Auth && Auth.isLoggedIn() && !Auth.isAdmin()) delete window.WIDGET_REGISTRY.verbose_log;
   widgetMgr = new WidgetManager('widgetLayer');
-  const defaults = ['agv_status', 'operation_log'];
+  global.widgetMgr = widgetMgr;
+  const defaults = ['agv_status', 'jason_camera_a', 'jason_camera_b', 'leo_camera', 'arm_control', 'nav_control', 'operation_log'];
   widgetMgr.restoreFromStorage(defaults);
   $('#btnAddWidget')?.addEventListener('click', () => widgetMgr.openPicker());
   $('#btnWidgetPickerClose')?.addEventListener('click', () => widgetMgr.closePicker());
   $('#widgetPickerBackdrop')?.addEventListener('click', () => widgetMgr.closePicker());
+  $('#widgetPickerSearch')?.addEventListener('input', () => widgetMgr.renderPicker());
   window.addEventListener('resize', () => {
     if (!widgetMgr) return;
     widgetMgr.widgets.forEach((card) => widgetMgr._clampCard(card));
@@ -2308,10 +2371,8 @@ function initWidgets() {
 }
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
-    if (Auth.isLoggedIn()) initWidgets();
-  });
-} else if (Auth.isLoggedIn()) {
+  document.addEventListener('DOMContentLoaded', () => { initWidgets(); });
+} else {
   initWidgets();
 }
 
